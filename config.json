@@ -1,0 +1,7 @@
+{
+  "initial_capital": 100000,
+  "allocations": {
+    "ICHIMOKU": 0.9,
+    "REVERSAL": 0.1
+  }
+}
