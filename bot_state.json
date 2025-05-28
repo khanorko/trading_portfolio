@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-05-28T11:30:06.468681",
+  "cash_balances": {
+    "strategy_0_IchimokuTrend": 3366.0249707724024,
+    "strategy_1_RsiReversal": 1816.9575544238398
+  },
+  "positions": {
+    "strategy_0_IchimokuTrend": {},
+    "strategy_1_RsiReversal": {}
+  },
+  "last_processed_timestamp": "2025-05-05T12:00:00",
+  "total_trades": 54,
+  "total_fees_paid": 104.26382074640497,
+  "metadata": {
+    "simulation_complete": true,
+    "final_equity": 5182.982525196242
+  }
+}

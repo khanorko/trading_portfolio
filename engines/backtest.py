@@ -1,11 +1,13 @@
 """
 Simple portfolio back‑test engine that mixes any list of Strategy objects.
 Assumes long‑only strategies for now.
+Enhanced with realistic trading costs, slippage, and state persistence.
 """
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
+from datetime import datetime
 
 # Import the execute_trade function
 # Assuming exchange_handler.py is in the same parent directory or PYTHONPATH
@@ -17,6 +19,13 @@ except ImportError:
         print("WARN: exchange_handler.execute_trade not found, paper trading disabled.")
         return None
 
+# Import state manager
+try:
+    from engines.state_manager import StateManager
+except ImportError:
+    print("WARN: StateManager not found, state persistence disabled.")
+    StateManager = None
+
 def run(
     df: pd.DataFrame, 
     strategies: List, 
@@ -24,191 +33,315 @@ def run(
     # --- New parameters for paper trading ---
     enable_paper_trading: bool = False,
     exchange_obj: Optional[Any] = None, # Accept CCXT exchange object
-    exchange_symbol: Optional[str] = None # Renamed from binance_symbol
-):
-    # precompute indicators
+    exchange_symbol: str = "BTC/USDT",
+    # --- New parameters for realistic trading costs ---
+    trading_fee_rate: float = 0.001,  # 0.1% per trade
+    slippage_rate: float = 0.0005,    # 0.05% slippage
+    min_profit_threshold: float = 0.015,  # 1.5% minimum profit
+    enable_realistic_costs: bool = True,
+    # --- New parameters for state persistence ---
+    enable_state_persistence: bool = True,
+    resume_from_state: bool = True
+) -> pd.DataFrame:
+    """
+    Enhanced backtest with realistic trading costs, slippage, and state persistence.
+    
+    Args:
+        enable_state_persistence: Save state periodically for crash recovery
+        resume_from_state: Try to resume from saved state on startup
+    """
+    
+    # Initialize state manager
+    state_manager = None
+    if enable_state_persistence and StateManager:
+        state_manager = StateManager()
+        print("🔄 State persistence enabled")
+    
+    # Try to load previous state
+    loaded_state = None
+    if resume_from_state and state_manager:
+        loaded_state = state_manager.load_state()
+    
+    # Initialize or restore state
+    if loaded_state:
+        print("🔄 Resuming from previous state...")
+        cash = loaded_state.get('cash_balances', {})
+        positions = loaded_state.get('positions', {})
+        total_trades = loaded_state.get('total_trades', 0)
+        total_fees_paid = loaded_state.get('total_fees_paid', 0.0)
+        last_processed = loaded_state.get('last_processed_timestamp', '')
+        
+        # Convert last_processed to pandas timestamp for comparison
+        if last_processed:
+            try:
+                last_processed_ts = pd.to_datetime(last_processed)
+                # Filter dataframe to only process new data
+                df = df[df.index > last_processed_ts]
+                print(f"📅 Resuming from {last_processed}, processing {len(df)} new rows")
+            except:
+                print("⚠️ Could not parse last processed timestamp, processing all data")
+        
+        # Restore cash for each strategy
+        for i, s in enumerate(strategies):
+            strategy_key = f"strategy_{i}_{s.__class__.__name__}"
+            if strategy_key in cash:
+                print(f"💰 Restored {strategy_key}: ${cash[strategy_key]:,.2f}")
+            else:
+                cash[strategy_key] = initial_capital / len(strategies)
+    else:
+        print("🆕 Starting fresh simulation...")
+        # Initialize fresh state
+        cash = {}
+        positions = {}
+        total_trades = 0
+        total_fees_paid = 0.0
+        
+        # Allocate initial capital equally among strategies
+        for i, s in enumerate(strategies):
+            strategy_key = f"strategy_{i}_{s.__class__.__name__}"
+            cash[strategy_key] = initial_capital / len(strategies)
+            positions[strategy_key] = {}
+
+    # Precompute indicators for all strategies
     for s in strategies:
         s.precompute_indicators(df)
-
-    cash   : Dict[str, float] = {s.slice: initial_capital*s.allocation for s in strategies}
-    qty    : Dict[str, float] = {s.slice: 0.0 for s in strategies}
-    entry  : Dict[str, float] = {s.slice: np.nan for s in strategies}
-    trades_log: List[Dict[str, Any]] = []
-
-    equity = pd.DataFrame(index=df.index, columns=[s.slice for s in strategies] + ["TOTAL"], dtype=float)
-
-    print(f"\nStarting Backtest Run... Paper Trading Enabled: {enable_paper_trading}")
-    if enable_paper_trading and not exchange_obj:
-        print("WARN: Paper trading enabled but exchange object is invalid. Disabling paper trading for this run.")
-        enable_paper_trading = False
-    if enable_paper_trading and not exchange_symbol: # Use exchange_symbol
-        print("WARN: Paper trading enabled but Exchange symbol is not set. Disabling paper trading for this run.") # Updated message
-        enable_paper_trading = False
-
-    for ts, row in df.iterrows():
-        # Check if essential price data is available
-        if pd.isna(row.close):
-            # print(f"WARN: Skipping timestamp {ts} due to missing close price.")
-            # Need to handle equity calculation if we skip
-            # For now, just forward fill the equity for skipped rows based on the last valid value
-            if ts != df.index[0]:
-                equity.loc[ts] = equity.loc[df.index[df.index.get_loc(ts) - 1]]
-            else:
-                 # Set initial equity if the very first row has NaNs we can't process
-                 for s in strategies:
-                     equity.at[ts, s.slice] = cash[s.slice]
-                 equity.at[ts, "TOTAL"] = initial_capital
-            continue # Skip this row for trading logic
+    
+    # Create equity tracking
+    equity_columns = ['Total'] + [f"strategy_{i}_{s.__class__.__name__}" for i, s in enumerate(strategies)]
+    equity = pd.DataFrame(index=df.index, columns=equity_columns)
+    
+    # Track state save frequency (save every 100 rows or 1 hour of data)
+    save_frequency = min(100, len(df) // 10)  # Save at least 10 times during run
+    rows_processed = 0
+    
+    print(f"💼 Starting simulation with {len(strategies)} strategies")
+    print(f"💰 Initial capital per strategy: ${initial_capital/len(strategies):,.2f}")
+    if enable_realistic_costs:
+        print(f"💸 Trading costs: {trading_fee_rate*100:.2f}% fee + {slippage_rate*100:.3f}% slippage")
+        print(f"🎯 Min profit threshold: {min_profit_threshold*100:.1f}%")
+    
+    for idx, row in df.iterrows():
+        rows_processed += 1
+        
+        for i, s in enumerate(strategies):
+            strategy_key = f"strategy_{i}_{s.__class__.__name__}"
+            s.slice = strategy_key  # Set slice for strategy identification
             
-        price = row.close
-
-        for s in strategies:
-            # --- OPEN LOGIC --- 
-            if qty[s.slice] == 0 and s.entry_signal(ts, df):
+            # Get current position for this strategy
+            current_position = positions[strategy_key]
+            
+            # Calculate current equity (cash + position value)
+            position_value = 0
+            if current_position:
+                position_value = current_position.get('quantity', 0) * row.close
+            
+            current_equity = cash[strategy_key] + position_value
+            equity.loc[idx, strategy_key] = current_equity
+            
+            # Check for signals
+            signal = s.generate_signal(row, idx)
+            
+            if signal == "BUY" and not current_position:
+                # Calculate position size with enhanced risk management
                 if pd.notna(row.ATR) and row.ATR > 0:
                     risk = row.ATR
                     # Calculate desired units based on strategy's simulated cash
-                    units = (cash[s.slice] * 0.0025) / risk 
+                    units = (cash[strategy_key] * 0.015) / risk  # Increased from 0.0025 to 0.015 (1.5% risk per trade)
                     
-                    # Check affordability based on strategy's simulated cash
-                    if units * price > cash[s.slice]:
-                        units = cash[s.slice] / price
+                    # Apply realistic costs
+                    entry_price = row.close
+                    if enable_realistic_costs:
+                        # Add slippage for market orders
+                        entry_price = row.close * (1 + slippage_rate)
                     
-                    # Ensure units > 0 after checks
-                    if units > 0:
-                        # --- Attempt Paper Trade (BUY) ---
-                        paper_trade_success = False
-                        if enable_paper_trading:
-                            print(f"--> PAPER TRADE: Attempting BUY {units:.4f} {exchange_symbol} for strategy {s.slice} at ~{price:.2f}") # Use exchange_symbol
-                            order_receipt = execute_trade(
-                                exchange_obj=exchange_obj, 
-                                symbol=exchange_symbol, # Use exchange_symbol
-                                order_type='market', 
-                                side='buy', 
-                                amount_base_currency_to_trade=units,
-                                current_price=price,
-                                sim_timestamp=ts
-                            )
-                            if order_receipt:
-                                # TODO: Potentially adjust 'units' based on actual filled amount from order_receipt if needed
-                                print(f"--> PAPER TRADE: BUY Order successful: {order_receipt.get('id')}")
-                                paper_trade_success = True 
-                            else:
-                                print(f"--> PAPER TRADE: BUY Order FAILED for strategy {s.slice}.")
-                        # --------------------------------
+                    trade_value = units * entry_price
+                    
+                    # Calculate fees
+                    fees = 0
+                    if enable_realistic_costs:
+                        fees = trade_value * trading_fee_rate
+                    
+                    # Check if we have enough cash
+                    total_cost = trade_value + fees
+                    if cash[strategy_key] >= total_cost:
+                        # Execute the trade
+                        cash[strategy_key] -= total_cost
+                        total_fees_paid += fees
+                        total_trades += 1
                         
-                        # Update Simulation State (only if paper trade succeeded or paper trading is disabled)
-                        # If paper trading fails, maybe we shouldn't update the sim state?
-                        # For now, let's update the sim state regardless, to keep the backtest consistent.
-                        # A more advanced system could handle this differently (e.g., skip sim update if paper fails).
-                        #if paper_trade_success or not enable_paper_trading:
-                        qty[s.slice] = units
-                        cash[s.slice] -= units * price # Use sim price for sim cash update
-                        entry[s.slice] = price
-                        trades_log.append({
-                            "timestamp": ts, "strategy": s.slice, "action": "BUY",
-                            "price": price, "quantity": units, "pnl": 0, "paper_traded": paper_trade_success
-                        })
-                        #else: 
-                        #    print(f"--> SIMULATION: Did not update simulation state for {s.slice} BUY due to paper trade failure.")
-
-            # --- CLOSE LOGIC ---            
-            elif qty[s.slice] > 0 and s.exit_signal(ts, df, entry[s.slice]):
-                sell_units = qty[s.slice] # Simulating closing the full position
-                pnl = (price - entry[s.slice]) * sell_units
+                        # Store position
+                        positions[strategy_key] = {
+                            'quantity': units,
+                            'entry_price': entry_price,
+                            'entry_date': idx,
+                            'fees_paid': fees
+                        }
+                        
+                        print(f"🟢 {strategy_key} BUY at {idx}: Price: ${entry_price:.2f}, Qty: {units:.6f}, Cost: ${total_cost:.2f}")
+                        
+                        # Save trade to history
+                        if state_manager:
+                            trade_data = {
+                                'timestamp': idx.isoformat(),
+                                'strategy': strategy_key,
+                                'action': 'BUY',
+                                'price': entry_price,
+                                'quantity': units,
+                                'value': trade_value,
+                                'fees': fees,
+                                'cash_after': cash[strategy_key]
+                            }
+                            state_manager.save_trade(trade_data)
+                        
+                        # Execute on exchange if enabled
+                        if enable_paper_trading and exchange_obj:
+                            try:
+                                execute_trade(
+                                    exchange_obj, 
+                                    exchange_symbol, 
+                                    "buy", 
+                                    units, 
+                                    entry_price
+                                )
+                            except Exception as e:
+                                print(f"⚠️ Paper trading failed: {e}")
+            
+            elif signal == "SELL" and current_position:
+                # Calculate exit with realistic costs
+                exit_price = row.close
+                if enable_realistic_costs:
+                    # Subtract slippage for market orders
+                    exit_price = row.close * (1 - slippage_rate)
                 
-                # --- Attempt Paper Trade (SELL) ---
-                paper_trade_success = False
-                if enable_paper_trading:
-                    print(f"--> PAPER TRADE: Attempting SELL {sell_units:.4f} {exchange_symbol} for strategy {s.slice} at ~{price:.2f}") # Use exchange_symbol
-                    order_receipt = execute_trade(
-                        exchange_obj=exchange_obj, 
-                        symbol=exchange_symbol, # Use exchange_symbol
-                        order_type='market', 
-                        side='sell', 
-                        amount_base_currency_to_trade=sell_units,
-                        current_price=price,
-                        sim_timestamp=ts
-                    )
-                    if order_receipt:
-                        print(f"--> PAPER TRADE: SELL Order successful: {order_receipt.get('id')}")
-                        paper_trade_success = True
-                    else:
-                        print(f"--> PAPER TRADE: SELL Order FAILED for strategy {s.slice}.")
-                # --------------------------------
+                quantity = current_position['quantity']
+                trade_value = quantity * exit_price
                 
-                # Update Simulation State (similar logic as BUY)
-                #if paper_trade_success or not enable_paper_trading:
-                cash[s.slice] += sell_units * price # Use sim price for sim cash update
-                trades_log.append({
-                    "timestamp": ts, "strategy": s.slice, "action": "SELL",
-                    "price": price, "quantity": sell_units, "pnl": pnl, "paper_traded": paper_trade_success
-                })
-                qty[s.slice] = 0
-                entry[s.slice] = np.nan
-                #else:
-                #    print(f"--> SIMULATION: Did not update simulation state for {s.slice} SELL due to paper trade failure.")
-
-        # --- Mark to Market (Simulation) ---
-        for s in strategies:
-            equity.at[ts, s.slice] = cash[s.slice] + qty[s.slice]*price
-        current_total_equity = equity.loc[ts, [s.slice for s in strategies]].sum()
-        if pd.isna(current_total_equity) and ts == df.index[0]:
-            equity.at[ts, "TOTAL"] = initial_capital
-        elif pd.notna(current_total_equity):
-            equity.at[ts, "TOTAL"] = current_total_equity
-        else: # If still NaN after first row, forward fill from last known total
-            if ts != df.index[0]:
-                equity.at[ts, "TOTAL"] = equity.at[df.index[df.index.get_loc(ts) - 1], "TOTAL"]
-            else: # Very first row was NaN and remains NaN
-                 equity.at[ts, "TOTAL"] = initial_capital
-
-    # --- Reporting --- 
-    print("\n--- Trade Log (Simulation) ---")
-    if not trades_log:
-        print("No simulated trades were made.")
-    else:
-        for trade in trades_log:
-             paper_status = "Paper:Yes" if trade.get("paper_traded") else "Paper:No/Failed"
-             print(f"{trade['timestamp']} - {trade['strategy']:<10} - {trade['action']:<4} - SimPx: {trade['price']:.2f}, Qty: {trade['quantity']:.4f}, SimPnL: {trade['pnl']:.2f} - {paper_status}")
-
-    print("\n--- Summary (Simulation) ---   ")
-    print(f"Initial Capital: {initial_capital:.2f}")
+                # Calculate fees
+                fees = 0
+                if enable_realistic_costs:
+                    fees = trade_value * trading_fee_rate
+                
+                # Calculate profit/loss
+                entry_cost = quantity * current_position['entry_price']
+                total_fees_for_position = current_position['fees_paid'] + fees
+                net_profit = trade_value - entry_cost - total_fees_for_position
+                profit_pct = net_profit / entry_cost
+                
+                # Apply minimum profit threshold
+                should_sell = True
+                if enable_realistic_costs and profit_pct < min_profit_threshold:
+                    # Only sell if profit exceeds threshold or it's a stop loss
+                    if profit_pct > -0.05:  # Don't sell unless 5% loss (stop loss)
+                        should_sell = False
+                
+                if should_sell:
+                    # Execute the sale
+                    cash[strategy_key] += trade_value - fees
+                    total_fees_paid += fees
+                    total_trades += 1
+                    
+                    print(f"🔴 {strategy_key} SELL at {idx}: Price: ${exit_price:.2f}, Qty: {quantity:.6f}, Profit: ${net_profit:.2f} ({profit_pct*100:.2f}%)")
+                    
+                    # Save trade to history
+                    if state_manager:
+                        trade_data = {
+                            'timestamp': idx.isoformat(),
+                            'strategy': strategy_key,
+                            'action': 'SELL',
+                            'price': exit_price,
+                            'quantity': quantity,
+                            'value': trade_value,
+                            'fees': fees,
+                            'profit': net_profit,
+                            'profit_pct': profit_pct,
+                            'cash_after': cash[strategy_key]
+                        }
+                        state_manager.save_trade(trade_data)
+                    
+                    # Clear position
+                    positions[strategy_key] = {}
+                    
+                    # Execute on exchange if enabled
+                    if enable_paper_trading and exchange_obj:
+                        try:
+                            execute_trade(
+                                exchange_obj, 
+                                exchange_symbol, 
+                                "sell", 
+                                quantity, 
+                                exit_price
+                            )
+                        except Exception as e:
+                            print(f"⚠️ Paper trading failed: {e}")
+        
+        # Calculate total equity
+        equity.loc[idx, 'Total'] = sum(equity.loc[idx, col] for col in equity_columns[1:])
+        
+        # Periodic state saving
+        if state_manager and rows_processed % save_frequency == 0:
+            state_manager.save_state(
+                cash_balances=cash,
+                positions=positions,
+                last_processed_timestamp=idx.isoformat(),
+                total_trades=total_trades,
+                total_fees_paid=total_fees_paid,
+                metadata={
+                    'rows_processed': rows_processed,
+                    'total_rows': len(df),
+                    'progress_pct': (rows_processed / len(df)) * 100
+                }
+            )
     
-    final_total_equity = equity["TOTAL"].iloc[-1]
-    if pd.isna(final_total_equity):
-        # If the last equity value is NaN, try finding the last valid one
-        last_valid_idx = equity["TOTAL"].last_valid_index()
-        if last_valid_idx is not None:
-            final_total_equity = equity.loc[last_valid_idx, "TOTAL"]
-        else: # If no valid equity value found at all, use initial capital
-            final_total_equity = initial_capital
-        
-    print(f"Final Total Equity: {final_total_equity:.2f}")
-    print(f"Total P&L: {(final_total_equity - initial_capital):.2f}")
+    # Final state save
+    if state_manager:
+        state_manager.save_state(
+            cash_balances=cash,
+            positions=positions,
+            last_processed_timestamp=df.index[-1].isoformat(),
+            total_trades=total_trades,
+            total_fees_paid=total_fees_paid,
+            metadata={
+                'simulation_complete': True,
+                'final_equity': equity.iloc[-1]['Total']
+            }
+        )
     
-    print("\n--- Strategy Breakdown (Simulation) ---")
-    total_trades_count = 0
-    for s in strategies:
-        strategy_trades = [t for t in trades_log if t["strategy"] == s.slice]
-        strategy_pnl = sum(t["pnl"] for t in strategy_trades if t["action"] == "SELL")
-        num_strategy_trades = len([t for t in strategy_trades if t["action"] == "BUY"]) # count entries
-        total_trades_count += num_strategy_trades
+    # Print enhanced summary
+    print("\n" + "="*60)
+    print("📊 ENHANCED BACKTEST RESULTS")
+    print("="*60)
+    
+    for i, s in enumerate(strategies):
+        strategy_key = f"strategy_{i}_{s.__class__.__name__}"
+        initial = initial_capital / len(strategies)
+        final = equity.iloc[-1][strategy_key]
+        returns = (final - initial) / initial * 100
         
-        initial_strategy_capital = initial_capital * s.allocation
-        # Find the last valid equity value for the strategy slice
-        last_valid_strat_idx = equity[s.slice].last_valid_index()
-        if last_valid_strat_idx is not None:
-            final_strategy_equity = equity.loc[last_valid_strat_idx, s.slice]
-        else:
-             final_strategy_equity = initial_strategy_capital # Default if no valid equity found
-
-        print(f"Strategy: {s.slice}")
-        print(f"  Initial Allocation: {initial_strategy_capital:.2f}")
-        print(f"  Final Equity: {final_strategy_equity:.2f}")
-        print(f"  P&L: {strategy_pnl:.2f}")
-        print(f"  Number of Trades: {num_strategy_trades}")
-        
-    print(f"\nTotal Number of Trades (Simulation Entries): {total_trades_count}")
-
+        print(f"\n🎯 {s.__class__.__name__}:")
+        print(f"   Initial: ${initial:,.2f}")
+        print(f"   Final:   ${final:,.2f}")
+        print(f"   Return:  {returns:.2f}%")
+    
+    total_initial = initial_capital
+    total_final = equity.iloc[-1]['Total']
+    total_returns = (total_final - total_initial) / total_initial * 100
+    
+    print(f"\n💰 TOTAL PORTFOLIO:")
+    print(f"   Initial Capital: ${total_initial:,.2f}")
+    print(f"   Final Equity:    ${total_final:,.2f}")
+    print(f"   Total Return:    {total_returns:.2f}%")
+    print(f"   Total Trades:    {total_trades}")
+    print(f"   Total Fees:      ${total_fees_paid:.2f}")
+    print(f"   Net Profit:      ${total_final - total_initial:.2f}")
+    
+    # Calculate annualized return
+    days = (df.index[-1] - df.index[0]).days
+    years = days / 365.25
+    if years > 0:
+        annualized_return = ((total_final / total_initial) ** (1/years) - 1) * 100
+        print(f"   Annualized:      {annualized_return:.2f}%")
+        print(f"   Period:          {days} days ({years:.2f} years)")
+    
+    print("="*60)
+    
     return equity
