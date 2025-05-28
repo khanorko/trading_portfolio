@@ -1,16 +1,164 @@
 """
-Entry script: python run_portfolio.py data.csv
+Entry script: python run_portfolio.py [csv_file_path]
+Runs a portfolio backtest using historical data and optionally
+executes trades on Alpaca Paper Trading.
 """
 import sys, json, pathlib, importlib
 import pandas as pd  # type: ignore
-import matplotlib.pyplot as plt # For plotting
+import matplotlib.pyplot as plt 
+# import os # No longer needed for keys
+# from dotenv import load_dotenv # No longer needed for keys
+import time
+
 from strategies import IchimokuTrend, RsiReversal
 from engines.backtest import run
+# Import Exchange handler functions
+from exchange_handler import initialize_exchange, execute_trade, fetch_and_print_recent_trades, fetch_historical_ohlcv
 
-DATA = sys.argv[1] if len(sys.argv)>1 else "btc_4h_2022_2025_clean.csv"
+# --- Configuration ---
+TARGET_EXCHANGE = "bybit"  # Options: "bybit", "alpaca"
+ENABLE_PAPER_TRADING = True  # Set to True to execute paper trades
+FETCH_DATA_FROM_EXCHANGE = True # Set to True to fetch data from exchange, False to use CSV
+DATA_TIMEFRAME = '4h' # Timeframe for data fetching (e.g., '1m', '1h', '4h', '1d')
 
-df = pd.read_csv(DATA, parse_dates=[0], index_col=0)
-df = df.sort_index()
+# Define symbols for each exchange
+EXCHANGE_SYMBOLS = {
+    "bybit": "BTC/USDT", # Bybit Testnet Spot BTC against USDT
+    "alpaca": "BTC/USD"  # Alpaca Paper Trading BTC against USD (if you use Alpaca)
+}
+
+DEFAULT_CSV_DATA = "btc_4h_2022_2025_clean.csv"
+# ---------------------
+
+# --- Date Range for Backtesting ---
+# Set these to define the period for the backtest.
+# Format: "YYYY-MM-DD"
+# Set to None or empty string to use all data from the start/end of the file.
+start_date_str = "2023-01-01"  # Example: "2022-01-01"
+end_date_str = "2023-12-31"    # Example: "2022-03-31"
+# ---------------------------------
+
+# Get the correct symbol for the target exchange
+TRADING_SYMBOL = EXCHANGE_SYMBOLS.get(TARGET_EXCHANGE.lower())
+if not TRADING_SYMBOL:
+    print(f"ERROR: Symbol not configured for exchange: {TARGET_EXCHANGE}. Exiting.")
+    sys.exit(1)
+
+# --- Initialize Exchange Connection (if enabled) ---
+exchange = None # Initialize exchange object to None
+actual_usdt_balance = 0.0  # Initialize balance to 0.0
+if ENABLE_PAPER_TRADING:
+    print(f"Paper trading enabled for {TARGET_EXCHANGE.upper()}.")
+    print(f"Initializing {TARGET_EXCHANGE.upper()} connection...")
+    # initialize_exchange now returns a tuple (exchange_obj, usdt_balance)
+    exchange, actual_usdt_balance = initialize_exchange(
+        exchange_name=TARGET_EXCHANGE,
+        paper_mode=True 
+    )
+    if not exchange:
+        print(f"ERROR: Failed to initialize {TARGET_EXCHANGE.upper()} exchange. Disabling paper trading.")
+        ENABLE_PAPER_TRADING = False
+    else:
+        print(f"{TARGET_EXCHANGE.upper()} connection initialized successfully.")
+else:
+    print(f"Paper trading for {TARGET_EXCHANGE.upper()} is disabled.")
+
+# --- Load Data ---
+# DATA = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_CSV_DATA # Keep for CSV fallback
+# print(f"Loading data from: {DATA}")
+
+df = None # Initialize df
+
+if FETCH_DATA_FROM_EXCHANGE and exchange and TRADING_SYMBOL:
+    print(f"Attempting to fetch historical data for {TRADING_SYMBOL} ({DATA_TIMEFRAME}) from {TARGET_EXCHANGE.upper()}...")
+    print(f"Period: {start_date_str} to {end_date_str}")
+    fetched_df = fetch_historical_ohlcv(
+        exchange_obj=exchange,
+        symbol=TRADING_SYMBOL,
+        timeframe=DATA_TIMEFRAME,
+        start_date_str=start_date_str,
+        end_date_str=end_date_str
+    )
+    if fetched_df is not None and not fetched_df.empty:
+        df = fetched_df
+        print(f"Successfully fetched {len(df)} records from {TARGET_EXCHANGE.upper()}.")
+        # Ensure standard column names if they differ, though fetch_historical_ohlcv should handle this.
+        # Example: df.rename(columns={'some_exchange_open_col': 'open'}, inplace=True)
+    else:
+        print(f"WARN: Failed to fetch data from {TARGET_EXCHANGE.upper()}, or no data returned.")
+        df = None # Ensure df is None if fetch failed
+else:
+    if not FETCH_DATA_FROM_EXCHANGE:
+        print("Fetching data from exchange is disabled (FETCH_DATA_FROM_EXCHANGE = False).")
+    if not exchange:
+        print("Exchange not initialized, cannot fetch data from exchange.")
+    if not TRADING_SYMBOL:
+        print("Trading symbol not defined, cannot fetch data from exchange.")
+    # No specific message here, just means conditions weren't met for fetching
+
+# Fallback to CSV if fetching was disabled or failed
+if df is None:
+    DATA_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_CSV_DATA
+    print(f"Falling back to loading data from CSV: {DATA_PATH}")
+    try:
+        df = pd.read_csv(DATA_PATH, parse_dates=[0], index_col=0)
+        df = df.sort_index()
+        print(f"Data loaded successfully from CSV. Shape: {df.shape}")
+        # Apply date filtering to CSV data as well, if df was loaded from CSV
+        # The existing date filtering logic below will handle this if df is not None
+    except FileNotFoundError:
+        print(f"ERROR: CSV data file not found at {DATA_PATH}. Exiting.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to load or parse CSV data file {DATA_PATH}: {e}. Exiting.")
+        sys.exit(1)
+
+# Ensure df is not None before proceeding
+if df is None or df.empty:
+    print(f"ERROR: No data loaded (either from exchange or CSV for the period {start_date_str} to {end_date_str}). Exiting.")
+    sys.exit(1)
+
+# --- Filter Data by Date Range (if specified) ---
+# This section should now primarily apply if data was loaded from CSV,
+# as fetch_historical_ohlcv already filters by date more precisely during fetch.
+# However, keeping it provides a consistent check and handles the CSV case for basic range filtering.
+# It also ensures that df from CSV is filtered by start/end dates before any further processing.
+
+# Only apply this broad filtering if data came from CSV or if fetch_historical_ohlcv somehow didn't filter (should not happen)
+# The main purpose now is for CSV data to be filtered according to start_date_str and end_date_str
+if not (FETCH_DATA_FROM_EXCHANGE and fetched_df is not None and not fetched_df.empty):
+    print("Applying date range filtering to the loaded DataFrame (primarily for CSV data)...")
+    original_shape_csv_filter = df.shape
+    if start_date_str:
+        try:
+            start_date = pd.to_datetime(start_date_str)
+            df = df[df.index >= start_date]
+            print(f"Filtered CSV data from start_date: {start_date_str}. Shape after start_date: {df.shape}")
+        except Exception as e:
+            print(f"Warning: Could not parse start_date '{start_date_str}' for CSV: {e}. Using all data from the beginning of CSV.")
+
+    if end_date_str:
+        try:
+            end_date = pd.to_datetime(end_date_str)
+            # For end_date, ensure we include the whole day if no time is specified
+            if end_date.time() == pd.Timestamp('00:00:00').time():
+                end_date_filter = end_date + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            else:
+                end_date_filter = end_date
+            df = df[df.index <= end_date_filter]
+            print(f"Filtered CSV data up to end_date: {end_date_str}. Shape after end_date: {df.shape}")
+        except Exception as e:
+            print(f"Warning: Could not parse end_date '{end_date_str}' for CSV: {e}. Using all data up to the end of CSV.")
+    
+    if df.empty and original_shape_csv_filter[0] > 0 : # if it was not empty before filtering
+        print(f"ERROR: No data remains after applying date filters ({start_date_str} to {end_date_str}) to CSV data. Original CSV shape for period: {original_shape_csv_filter}. Exiting.")
+        sys.exit(1)
+
+# Final check if df is empty after all loading and filtering attempts
+if df.empty:
+    print(f"ERROR: DataFrame is empty after all data loading and filtering attempts for period {start_date_str} to {end_date_str}. Exiting.")
+    sys.exit(1)
+# --------------------------------------------------
 
 # Attempt to infer frequency for the DataFrame index if it's a DatetimeIndex
 if isinstance(df.index, pd.DatetimeIndex):
@@ -82,7 +230,7 @@ def plot_results(df_full: pd.DataFrame, equity_df: pd.DataFrame, strategies_list
     fig2, ax2 = plt.subplots(figsize=(14, 7))
     for col in equity_df.columns:
         ax2.plot(equity_df.index, equity_df[col], label=col)
-    ax2.set_title('Portfolio Equity Curve')
+    ax2.set_title('Portfolio Equity Curve (Simulation)')
     ax2.set_xlabel('Date')
     ax2.set_ylabel('Equity')
     ax2.legend()
@@ -99,8 +247,25 @@ def plot_results(df_full: pd.DataFrame, equity_df: pd.DataFrame, strategies_list
 
 # --- Main Execution ---
 # df is already loaded and sorted here
+
+# Determine initial capital for simulation
+# Use actual fetched balance if paper trading is enabled and balance is positive
+# Otherwise, use a default (e.g., the 4000 we set previously, or a new default)
+simulation_initial_capital = 4000 # Default if not using fetched balance
+
+if ENABLE_PAPER_TRADING and exchange and actual_usdt_balance > 0:
+    print(f"Using actual fetched USDT balance from {TARGET_EXCHANGE.upper()} as initial capital: {actual_usdt_balance:.2f} USDT")
+    simulation_initial_capital = actual_usdt_balance
+elif ENABLE_PAPER_TRADING and exchange and actual_usdt_balance <= 0:
+    print(f"WARNING: Fetched USDT balance is {actual_usdt_balance:.2f}. Paper trading might fail due to no funds.")
+    print(f"         Proceeding with default simulation capital: {simulation_initial_capital:.2f} USDT for backtest logic.")
+    # Potentially disable paper trading if balance is zero, or let it try and fail
+    # ENABLE_PAPER_TRADING = False # Optional: force disable if no balance
+else:
+    print(f"Paper trading not enabled or exchange not initialized. Using default simulation capital: {simulation_initial_capital:.2f} USDT")
+
 # Precompute indicators for all strategies on the main df so plot_results can access them
-# The run function also calls precompute_indicators, but we need them on df for plotting.
+print("Precomputing indicators for plotting...")
 for strat_instance in strats:
     strat_instance.precompute_indicators(df) 
     # This makes sure df has 'tenkan', 'kijun', 'ssa', 'ssb', 'chikou', 'RSI', 'ATR' before plotting
@@ -108,11 +273,25 @@ for strat_instance in strats:
     if isinstance(strat_instance, IchimokuTrend):
         KIJUN_plot = strat_instance.KIJUN # Assuming KIJUN is an attribute or class variable
 
-equity = run(df, strats)
+print("Running backtest simulation...")
+equity = run(
+    df,
+    strats,
+    initial_capital=simulation_initial_capital, 
+    # Pass Exchange details to the run function
+    enable_paper_trading=ENABLE_PAPER_TRADING,
+    exchange_obj=exchange,
+    exchange_symbol=TRADING_SYMBOL 
+)
 equity.to_csv("equity_curve.csv")
 # The print statement from backtest.py will show detailed totals
 
 # Call plotting function
 plot_results(df, equity, strats)
 
-print("Script finished. Plots should be displayed or saved. Check equity_curve.csv for detailed equity data.")
+# Fetch and print actual recent trades from the exchange if paper trading was enabled
+if ENABLE_PAPER_TRADING and exchange:
+    print(f"\nFetching actual trades from {TARGET_EXCHANGE.upper()} (may include trades from previous runs)...")
+    fetch_and_print_recent_trades(exchange, TRADING_SYMBOL, limit=50)
+
+print("\nScript finished.")
