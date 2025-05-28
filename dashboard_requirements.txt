@@ -1,0 +1,27 @@
+# Trading Bot Dashboard Requirements
+# Install with: pip install -r dashboard_requirements.txt
+
+# Core dashboard dependencies
+streamlit>=1.28.0
+plotly>=5.15.0
+pandas>=2.0.0
+
+# Data processing and analysis
+numpy>=1.24.0
+sqlite3  # Built-in with Python
+
+# Optional: For advanced features
+seaborn>=0.12.0  # Additional plotting
+matplotlib>=3.7.0  # Backup plotting
+
+# Notification system (optional)
+requests>=2.31.0
+smtplib  # Built-in with Python
+
+# Your existing bot dependencies (if not already installed)
+ccxt>=4.0.0
+python-dotenv>=1.0.0
+
+# Development and testing (optional)
+pytest>=7.4.0
+black>=23.0.0

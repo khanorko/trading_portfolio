@@ -21,11 +21,6 @@ ENABLE_PAPER_TRADING = True  # Set to True to execute paper trades
 FETCH_DATA_FROM_EXCHANGE = True # Set to True to fetch data from exchange, False to use CSV
 DATA_TIMEFRAME = '4h' # Timeframe for data fetching (e.g., '1m', '1h', '4h', '1d')
 
-# --- State Persistence Configuration ---
-ENABLE_STATE_PERSISTENCE = True  # Save bot state for crash recovery
-RESUME_FROM_STATE = True  # Try to resume from previous state on startup
-CLEAR_STATE_ON_START = False  # Set to True to start fresh (clears saved state)
-
 # Define symbols for each exchange
 EXCHANGE_SYMBOLS = {
     "bybit": "BTC/USDT", # Bybit Testnet Spot BTC against USDT
@@ -39,8 +34,8 @@ DEFAULT_CSV_DATA = "btc_4h_2022_2025_clean.csv"
 # Set these to define the period for the backtest.
 # Format: "YYYY-MM-DD"
 # Set to None or empty string to use all data from the start/end of the file.
-start_date_str = "2022-01-01"  # Changed to test full multi-year period including bear market
-end_date_str = "2025-05-27"    # Changed to test up to present day
+start_date_str = "2021-01-01"  # Changed to test 2021-2023 period including bear market
+end_date_str = "2023-12-31"    # Changed to test 2021-2023 period including bear market
 # ---------------------------------
 
 # Get the correct symbol for the target exchange
@@ -284,16 +279,6 @@ TRADING_FEE_RATE = 0.001      # 0.1% per trade (Bybit standard)
 SLIPPAGE_RATE = 0.0005        # 0.05% slippage
 MIN_PROFIT_THRESHOLD = 0.005  # 0.5% instead of 1.5%
 
-# Handle state clearing if requested
-if CLEAR_STATE_ON_START and ENABLE_STATE_PERSISTENCE:
-    try:
-        from engines.state_manager import StateManager
-        state_manager = StateManager()
-        state_manager.clear_state()
-        print("🗑️ Previous state cleared - starting fresh")
-    except ImportError:
-        print("⚠️ StateManager not available - cannot clear state")
-
 print("Running enhanced backtest simulation with realistic costs...")
 equity = run(
     df,
@@ -307,10 +292,7 @@ equity = run(
     trading_fee_rate=TRADING_FEE_RATE,
     slippage_rate=SLIPPAGE_RATE,
     min_profit_threshold=MIN_PROFIT_THRESHOLD,
-    enable_realistic_costs=ENABLE_REALISTIC_COSTS,
-    # New parameters for state persistence
-    enable_state_persistence=ENABLE_STATE_PERSISTENCE,
-    resume_from_state=RESUME_FROM_STATE
+    enable_realistic_costs=ENABLE_REALISTIC_COSTS
 )
 equity.to_csv("equity_curve.csv")
 # The print statement from backtest.py will show detailed totals

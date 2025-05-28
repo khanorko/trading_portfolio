@@ -1,3 +1,4 @@
+
 """
 Base classes and shared helpers for strategy modules.
 """
@@ -10,8 +11,8 @@ class Strategy(ABC):
     Abstract base class every strategy must inherit from.
     Each strategy works on its own capital slice.
     """
-    def __init__(self, slice_name: str = None, allocation: float = 1.0):
-        self.slice = slice_name or self.__class__.__name__
+    def __init__(self, slice_name: str, allocation: float):
+        self.slice = slice_name
         self.allocation = allocation    # 0–1 fraction of total equity
 
     # ------------------------------------------------------------------
@@ -30,15 +31,6 @@ class Strategy(ABC):
     def exit_signal(self, idx: pd.Timestamp, df: pd.DataFrame, entry_price: float) -> bool:
         """Return True when we want to exit the open position."""
         ...
-
-    def generate_signal(self, row: pd.Series, idx: pd.Timestamp) -> str:
-        """
-        New unified signal method that returns BUY/SELL/HOLD.
-        Override this in subclasses for better control, or it will use the old entry/exit methods.
-        """
-        # Default implementation uses the old methods for backward compatibility
-        # Subclasses should override this method for better performance
-        return "HOLD"
 
     # ------------------------------------------------------------------
     # sizing helpers

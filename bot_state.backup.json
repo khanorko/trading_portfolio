@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-05-28T11:59:29.046997",
+  "cash_balances": {
+    "strategy_0_MomentumStrategy": 2000.0,
+    "strategy_1_RsiReversal": 2000.0
+  },
+  "positions": {
+    "strategy_0_MomentumStrategy": {},
+    "strategy_1_RsiReversal": {}
+  },
+  "last_processed_timestamp": "2025-05-05T12:00:00",
+  "total_trades": 0,
+  "total_fees_paid": 0.0,
+  "metadata": {
+    "simulation_complete": true,
+    "final_equity": 4000.0
+  }
+}

@@ -46,32 +46,6 @@ class IchimokuTrend(Strategy):
         df["volatility_regime"] = df["ATR"].rolling(20).rank(pct=True)  # Volatility percentile
         df["trend_strength"] = abs(df.close - df.close.shift(20)) / df["ATR"]  # Trend strength
 
-    def generate_signal(self, row: pd.Series, idx: pd.Timestamp) -> str:
-        """
-        Generate BUY/SELL/HOLD signals based on Ichimoku conditions.
-        """
-        # Check if we have all required values
-        if (pd.isna(row.tenkan) or pd.isna(row.kijun) or 
-            pd.isna(row.ssa) or pd.isna(row.ssb) or pd.isna(row.chikou)):
-            return "HOLD"
-        
-        # BUY signal: Strong Ichimoku bullish alignment
-        if (row.tenkan > row.kijun and
-            row.close > max(row.ssa, row.ssb) and
-            row.chikou > row.close and
-            row.ssa > row.ssb and
-            row.volatility_regime < 0.9 and  # Not in extreme volatility
-            row.trend_strength > 2.0):  # Strong trend
-            return "BUY"
-        
-        # SELL signal: Ichimoku bearish conditions
-        elif (row.tenkan < row.kijun or
-              row.close < min(row.ssa, row.ssb) or
-              row.volatility_regime > 0.95):  # Volatility spike
-            return "SELL"
-        
-        return "HOLD"
-
     def _long_entry_cond(self, r, current_equity=None, initial_capital=None):
         # Check if we have all required values
         if pd.isna(r.tenkan) or pd.isna(r.kijun) or pd.isna(r.ssa) or pd.isna(r.ssb) or pd.isna(r.chikou):
