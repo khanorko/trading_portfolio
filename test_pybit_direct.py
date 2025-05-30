@@ -1,9 +1,18 @@
 from pybit.unified_trading import HTTP
 import os
+from dotenv import load_dotenv
 
-# Use your new Bybit Testnet API Keys directly here
-BYBIT_TESTNET_KEY = "RIhmki0mWKocv4Na3y"
-BYBIT_TESTNET_SECRET = "bk9EjN26KPn5Jp8yhmfy5wp17Iqv8O7qec6k"
+# Load environment variables from .env file
+load_dotenv()
+
+# Get API keys from environment variables
+BYBIT_TESTNET_KEY = os.getenv('BYBIT_API_KEY')
+BYBIT_TESTNET_SECRET = os.getenv('BYBIT_API_SECRET')
+
+# Validate that keys are loaded
+if not BYBIT_TESTNET_KEY or not BYBIT_TESTNET_SECRET:
+    print("ERROR: BYBIT_API_KEY and BYBIT_API_SECRET must be set in .env file")
+    exit(1)
 
 print(f"Attempting to connect to Bybit Testnet using PyBit with API Key: {BYBIT_TESTNET_KEY[:5]}...")
 

@@ -3,30 +3,43 @@ import pandas as pd
 import decimal
 import time
 import traceback # Import traceback module
+import os
+from dotenv import load_dotenv
 
-# --- Alpaca Configuration ---
-# WARNING: Hardcoding keys here is generally discouraged for security reasons.
-# Consider using environment variables or a more secure configuration method.
-HARDCODED_ALPACA_API_KEY = "PK8S3IETFFAZDF5GGF56" 
-HARDCODED_ALPACA_SECRET_KEY = "53L9sdVaBEUK7XSn0i0aSAjY00x4tL0WkqvP1Lq8"
+# Load environment variables from .env file
+load_dotenv()
+
+# --- API Configuration from Environment Variables ---
+# Alpaca Configuration
+ALPACA_API_KEY = os.getenv('ALPACA_API_KEY')
+ALPACA_API_SECRET = os.getenv('ALPACA_API_SECRET')
+
+# Bybit Configuration
+BYBIT_API_KEY = os.getenv('BYBIT_API_KEY')
+BYBIT_API_SECRET = os.getenv('BYBIT_API_SECRET')
+BYBIT_TESTNET = os.getenv('BYBIT_TESTNET', 'true').lower() == 'true'
+
+# Validate that required keys are loaded
+if not BYBIT_API_KEY or not BYBIT_API_SECRET:
+    print("WARNING: BYBIT_API_KEY and BYBIT_API_SECRET not found in environment variables.")
+    print("Please create a .env file with your API keys or set them as environment variables.")
+
 # ALPACA_PAPER_URL = "https://paper-api.alpaca.markets" # No longer directly used in config
 # --------------------------
 
 # --- Bybit Configuration ---
 # IMPORTANT: For Bybit Testnet, generate keys from https://testnet.bybit.com
 # For Bybit Live, generate keys from https://www.bybit.com
-BYBIT_API_KEY = "RIhmki0mWKocv4Na3y" # Your new, confirmed Bybit Testnet Key ID
-BYBIT_SECRET_KEY = "bk9EjN26KPn5Jp8yhmfy5wp17Iqv8O7qec6k" # Your new, confirmed Bybit Testnet Secret
 # --------------------------
 
 def initialize_exchange(exchange_name="bybit", api_key=None, secret_key=None, paper_mode=True):
     """Initializes the CCXT exchange object.
-    Uses hardcoded keys if api_key or secret_key are not provided.
+    Uses environment variables if api_key or secret_key are not provided.
 
     Args:
         exchange_name (str): The exchange to use ('alpaca' or 'bybit'). Defaults to "bybit".
-        api_key (str, optional): Your API key. Defaults to None.
-        secret_key (str, optional): Your API secret. Defaults to None.
+        api_key (str, optional): Your API key. Defaults to None (uses environment variable).
+        secret_key (str, optional): Your API secret. Defaults to None (uses environment variable).
         paper_mode (bool): Whether to use Paper Trading (Alpaca) or Testnet (Bybit). Defaults to True.
 
     Returns:
@@ -36,14 +49,14 @@ def initialize_exchange(exchange_name="bybit", api_key=None, secret_key=None, pa
     final_secret_key = None
 
     if exchange_name.lower() == "alpaca":
-        final_api_key = api_key if api_key else HARDCODED_ALPACA_API_KEY
-        final_secret_key = secret_key if secret_key else HARDCODED_ALPACA_SECRET_KEY
+        final_api_key = api_key if api_key else ALPACA_API_KEY
+        final_secret_key = secret_key if secret_key else ALPACA_API_SECRET
         if not final_api_key or not final_secret_key:
             print(f"ERROR: Alpaca API Key or Secret Key is missing.")
             return None
     elif exchange_name.lower() == "bybit":
         final_api_key = api_key if api_key else BYBIT_API_KEY
-        final_secret_key = secret_key if secret_key else BYBIT_SECRET_KEY
+        final_secret_key = secret_key if secret_key else BYBIT_API_SECRET
         if not final_api_key or not final_secret_key:
             print(f"ERROR: Bybit API Key or Secret Key is missing.")
             return None
