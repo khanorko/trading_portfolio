@@ -8,7 +8,7 @@ pandas>=2.0.0
 
 # Data processing and analysis
 numpy>=1.24.0
-sqlite3  # Built-in with Python
+# sqlite3 is built-in with Python
 
 # Optional: For advanced features
 seaborn>=0.12.0  # Additional plotting
@@ -16,7 +16,7 @@ matplotlib>=3.7.0  # Backup plotting
 
 # Notification system (optional)
 requests>=2.31.0
-smtplib  # Built-in with Python
+# smtplib is built-in with Python
 
 # Your existing bot dependencies (if not already installed)
 ccxt>=4.0.0

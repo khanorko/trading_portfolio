@@ -44,6 +44,8 @@ pytest_cache/
 
 # Environments
 .env
+.env.local
+.env.production
 .venv/
 venv/
 env/
@@ -58,4 +60,43 @@ ENV/
 .vscode/
 .idea/
 *.nbconvert
-.DS_Store 
+.DS_Store
+
+# Trading Bot Specific - SENSITIVE FILES
+# API Keys and secrets
+config_live.json
+secrets.json
+api_keys.txt
+
+# Database files (contain trading history)
+*.db
+*.sqlite
+*.sqlite3
+trading_dashboard.db
+
+# State files (may contain sensitive position data)
+bot_state.json
+bot_state.backup.json
+live_bot_state.json
+
+# Log files (may contain API responses)
+*.log
+logs/
+trading_bot.log
+
+# Backup files
+*.backup
+*.bak
+
+# Test files with real data
+test_live_*.py
+*_live_test.py
+
+# CSV files with real trading data
+equity_curve.csv
+trade_history.csv
+*_trades.csv
+*_equity.csv
+
+# Dashboard summary (may contain real performance data)
+dashboard_summary.json 

@@ -103,7 +103,7 @@ def load_database_data():
 
 def calculate_metrics(data):
     """Calculate key performance metrics"""
-    if data['trades'].empty or data['equity'].empty:
+    if data['equity'].empty:
         return {
             'total_equity': 0,
             'daily_pnl': 0,
@@ -119,16 +119,22 @@ def calculate_metrics(data):
     # Latest equity data
     latest_equity = data['equity'].iloc[0] if not data['equity'].empty else {}
     
-    # Trade statistics
-    completed_trades = data['trades'][data['trades']['action'] == 'SELL']
-    total_trades = len(completed_trades)
-    winning_trades = len(completed_trades[completed_trades['pnl'] > 0])
-    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
-    
-    # Profit factor
-    gross_profit = completed_trades[completed_trades['pnl'] > 0]['pnl'].sum()
-    gross_loss = abs(completed_trades[completed_trades['pnl'] < 0]['pnl'].sum())
-    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+    # Trade statistics (handle empty trades gracefully)
+    if not data['trades'].empty:
+        completed_trades = data['trades'][data['trades']['action'] == 'SELL']
+        total_trades = len(completed_trades)
+        winning_trades = len(completed_trades[completed_trades['pnl'] > 0])
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+        
+        # Profit factor
+        gross_profit = completed_trades[completed_trades['pnl'] > 0]['pnl'].sum()
+        gross_loss = abs(completed_trades[completed_trades['pnl'] < 0]['pnl'].sum())
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+    else:
+        # No trades data available
+        total_trades = 0
+        win_rate = 0
+        profit_factor = 0
     
     # Max drawdown calculation
     if not data['equity'].empty:
@@ -300,7 +306,10 @@ def main():
         st.markdown(f"**Daily P&L:** <span class='{daily_pnl_color}'>${metrics['daily_pnl']:,.2f}</span>", unsafe_allow_html=True)
     
     with col4:
-        st.markdown(f"**Unrealized P&L:** <span class='neutral'>${data['equity'].iloc[0]['unrealized_pnl']:,.2f}</span>", unsafe_allow_html=True)
+        unrealized_pnl = 0
+        if not data['equity'].empty and 'unrealized_pnl' in data['equity'].columns:
+            unrealized_pnl = data['equity'].iloc[0]['unrealized_pnl']
+        st.markdown(f"**Unrealized P&L:** <span class='neutral'>${unrealized_pnl:,.2f}</span>", unsafe_allow_html=True)
     
     st.markdown("---")
     
