@@ -2,7 +2,7 @@
 
 A sophisticated algorithmic trading bot with Ichimoku and RSI Reversal strategies, featuring real-time dashboard monitoring and state persistence.
 
-## ⚠️ **IMPORTANT SECURITY NOTICE**
+## ⚠️ **IMPORTANT SECURITY NOTICE** ⚠️
 
 **NEVER commit API keys or sensitive data to GitHub!**
 
