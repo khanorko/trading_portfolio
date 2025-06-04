@@ -9,11 +9,16 @@ import matplotlib.pyplot as plt
 # import os # No longer needed for keys
 # from dotenv import load_dotenv # No longer needed for keys
 import time
+import os
+from pathlib import Path
 
 from strategies import IchimokuTrend, RsiReversal
 from engines.backtest import run
 # Import Exchange handler functions
 from exchange_handler import initialize_exchange, execute_trade, fetch_and_print_recent_trades, fetch_historical_ohlcv
+
+# Import configuration and components
+from config import Config, DEFAULT_CSV_DATA, EQUITY_CURVE_CSV
 
 # --- Configuration ---
 TARGET_EXCHANGE = "bybit"  # Options: "bybit", "alpaca"
@@ -27,7 +32,6 @@ EXCHANGE_SYMBOLS = {
     "alpaca": "BTC/USD"  # Alpaca Paper Trading BTC against USD (if you use Alpaca)
 }
 
-DEFAULT_CSV_DATA = "btc_4h_2022_2025_clean.csv"
 # ---------------------
 
 # --- Date Range for Backtesting ---
@@ -275,9 +279,9 @@ for strat_instance in strats:
 
 # Add new configuration for realistic costs
 ENABLE_REALISTIC_COSTS = True  # Set to True to include fees and slippage
-TRADING_FEE_RATE = 0.001      # 0.1% per trade (Bybit standard)
-SLIPPAGE_RATE = 0.0005        # 0.05% slippage
-MIN_PROFIT_THRESHOLD = 0.005  # 0.5% instead of 1.5%
+TRADING_FEE_RATE = Config.TRADING_FEE_RATE
+SLIPPAGE_RATE = Config.SLIPPAGE_RATE
+MIN_PROFIT_THRESHOLD = Config.MIN_PROFIT_THRESHOLD
 
 print("Running enhanced backtest simulation with realistic costs...")
 equity = run(
@@ -294,7 +298,7 @@ equity = run(
     min_profit_threshold=MIN_PROFIT_THRESHOLD,
     enable_realistic_costs=ENABLE_REALISTIC_COSTS
 )
-equity.to_csv("equity_curve.csv")
+equity.to_csv(EQUITY_CURVE_CSV)
 # The print statement from backtest.py will show detailed totals
 
 # Call plotting function

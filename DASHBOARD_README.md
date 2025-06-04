@@ -16,7 +16,7 @@ Professional real-time monitoring dashboard for your algorithmic trading bot.
 
 ### Option 1: Automated Setup
 ```bash
-cd /Users/johansalo/Downloads/trading_portfolio
+cd trading_portfolio  # Navigate to your project directory
 python quick_start.py
 ```
 

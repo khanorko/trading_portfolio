@@ -1,23 +1,26 @@
 """
-Enhanced State Manager with Dashboard Logging
-Extends the existing state manager with database logging for dashboards
+Enhanced State Manager for Trading Bot Dashboard
+Provides SQLite-based logging for portfolio tracking
 """
+
 import sqlite3
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+from config import Config, DATABASE_PATH, BOT_STATE_FILE
 from state_manager import TradingStateManager, PositionManager
-import logging
 
 class DashboardStateManager(TradingStateManager):
-    def __init__(self, state_file="bot_state.json"):
-        super().__init__(state_file)
-        self.db_path = "trading_dashboard.db"
-        self.init_dashboard_database()
+    def __init__(self, state_file=None):
+        self.state_file = Path(state_file) if state_file else Path(BOT_STATE_FILE)
+        self.db_path = DATABASE_PATH
+        
         self.logger = logging.getLogger(__name__)
+        self.init_database()
     
-    def init_dashboard_database(self):
-        """Initialize SQLite database for dashboard data"""
+    def init_database(self):
+        """Initialize SQLite database with required tables"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         

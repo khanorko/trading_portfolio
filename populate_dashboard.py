@@ -10,25 +10,40 @@ import json
 from datetime import datetime, timedelta
 import numpy as np
 from dashboard_integration import DashboardIntegration
+from pathlib import Path
+
+# Import configuration
+from config import Config, DATABASE_PATH, EQUITY_CURVE_CSV, TRADE_HISTORY_CSV, DASHBOARD_SUMMARY
+from enhanced_state_manager import DashboardStateManager
 
 def load_real_backtest_data():
     """Load real backtest data from CSV files"""
     try:
         # Load equity curve data
-        equity_df = pd.read_csv('equity_curve.csv')
-        equity_df['timestamp'] = pd.to_datetime(equity_df['datetime'])
-        equity_df['total_equity'] = equity_df['TOTAL']
-        equity_df['unrealized_pnl'] = 0  # Not available in this format
-        equity_df['realized_pnl'] = equity_df['TOTAL'] - 4000  # Calculate from initial balance
+        equity_file = Path(EQUITY_CURVE_CSV)
+        if equity_file.exists():
+            print(f"📈 Loading equity data from: {EQUITY_CURVE_CSV}")
+            equity_df = pd.read_csv(EQUITY_CURVE_CSV)
+            equity_df['timestamp'] = pd.to_datetime(equity_df.iloc[:, 0])  # First column as timestamp
+            equity_df['total_equity'] = equity_df['TOTAL']
+            equity_df['unrealized_pnl'] = 0  # Not available in this format
+            equity_df['realized_pnl'] = equity_df['TOTAL'] - 4000  # Calculate from initial balance
+            print(f"   ✅ Loaded {len(equity_df)} equity records")
+        else:
+            print(f"❌ No {EQUITY_CURVE_CSV} found, creating sample equity data...")
+            equity_df = create_sample_equity_data()
         
         # Load trade history if it exists
-        try:
-            trades_df = pd.read_csv('trade_history.csv')
+        trades_file = Path(TRADE_HISTORY_CSV)
+        if trades_file.exists():
+            print(f"📊 Loading trades data from: {TRADE_HISTORY_CSV}")
+            trades_df = pd.read_csv(TRADE_HISTORY_CSV)
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
             if 'exit_time' in trades_df.columns:
                 trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
-        except FileNotFoundError:
-            print("No trade_history.csv found, creating sample trades...")
+            print(f"   ✅ Loaded {len(trades_df)} trade records")
+        else:
+            print(f"❌ No {TRADE_HISTORY_CSV} found, creating sample trades...")
             trades_df = create_sample_trades()
         
         return equity_df, trades_df
@@ -94,9 +109,39 @@ def create_sample_data():
     
     return equity_df, trades_df
 
+def create_sample_equity_data():
+    """Create sample equity curve data for testing"""
+    print("📊 Creating sample equity data...")
+    
+    # Generate 30 days of hourly data
+    dates = pd.date_range(
+        start=datetime.now() - timedelta(days=30),
+        end=datetime.now(),
+        freq='1H'
+    )
+    
+    # Generate realistic equity curve with some volatility
+    np.random.seed(42)
+    initial_equity = 4000
+    returns = np.random.normal(0.0001, 0.02, len(dates))  # Small positive drift with volatility
+    equity_values = [initial_equity]
+    
+    for i in range(1, len(dates)):
+        new_equity = equity_values[-1] * (1 + returns[i])
+        equity_values.append(new_equity)
+    
+    return pd.DataFrame({
+        'timestamp': dates,
+        'total': equity_values,
+        'daily_pnl': np.random.normal(5, 50, len(dates)),
+        'unrealized_pnl': np.random.normal(0, 25, len(dates)),
+        'open_positions': np.random.randint(0, 5, len(dates))
+    })
+
 def populate_dashboard():
     """Main function to populate the dashboard with data"""
-    print("🚀 Populating Trading Dashboard...")
+    print("🚀 Populating Trading Dashboard Database")
+    print("=" * 50)
     
     # Load data
     equity_df, trades_df = load_real_backtest_data()
@@ -106,76 +151,93 @@ def populate_dashboard():
     # Initialize dashboard integration
     integrator = DashboardIntegration()
     
-    # Create database and populate with data
-    print("💾 Inserting data into database...")
+    print(f"\n🗄️ Initializing database: {DATABASE_PATH}")
     
-    # Insert equity data directly into database
-    conn = sqlite3.connect(integrator.dashboard_state.db_path)
-    cursor = conn.cursor()
-    
-    for _, row in equity_df.iterrows():
-        cursor.execute('''
-            INSERT INTO equity_snapshots 
-            (timestamp, total_equity, ichimoku_equity, reversal_equity, open_positions, unrealized_pnl, daily_pnl)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            row['timestamp'].isoformat(),
-            row['total_equity'],
-            0,  # ichimoku_equity - not separated in our data
-            0,  # reversal_equity - not separated in our data
-            0,  # open_positions
-            row['unrealized_pnl'],
-            row['realized_pnl']
-        ))
-    
-    # Insert trade data
-    for _, trade in trades_df.iterrows():
-        trade_data = {
-            'timestamp': trade['entry_time'].isoformat(),
-            'symbol': 'BTC/USDT',
-            'strategy': trade['strategy'],
-            'action': 'BUY' if trade['side'] == 'long' else 'SELL',
-            'quantity': trade['quantity'],
-            'price': trade['entry_price'],
-            'pnl': trade['pnl'],
-            'fee': trade.get('fees', 0),
-            'paper_traded': False,  # Backtest data
-            'entry_price': trade['entry_price'],
-            'exit_price': trade.get('exit_price', trade['entry_price'])
-        }
+    # Clear existing data (optional)
+    clear_existing = input("🗑️ Clear existing dashboard data? (y/N): ").lower().strip()
+    if clear_existing == 'y':
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
         
-        integrator.dashboard_state.log_trade(trade_data)
+        # Clear tables
+        cursor.execute("DELETE FROM trades")
+        cursor.execute("DELETE FROM equity_snapshots")
+        cursor.execute("DELETE FROM performance_metrics")
+        cursor.execute("DELETE FROM system_health")
+        
+        conn.commit()
+        conn.close()
+        print("   ✅ Existing data cleared")
     
-    conn.commit()
-    conn.close()
+    # Process and insert equity data
+    print(f"\n💰 Processing {len(equity_df)} equity snapshots...")
+    for idx, row in equity_df.iterrows():
+        try:
+            # Create equity snapshot data
+            equity_data = {
+                'timestamp': row['timestamp'] if 'timestamp' in row else row.iloc[0],
+                'total_equity': float(row.get('total', row.iloc[1])),
+                'daily_pnl': float(row.get('daily_pnl', 0)),
+                'unrealized_pnl': float(row.get('unrealized_pnl', 0)),
+                'open_positions': int(row.get('open_positions', 0))
+            }
+            
+            integrator.dashboard_state.log_equity_snapshot_direct(equity_data)
+        except Exception as e:
+            print(f"   ⚠️ Error processing equity row {idx}: {e}")
     
-    # Add some performance metrics
-    total_pnl = trades_df['pnl'].sum()
-    win_rate = (trades_df['pnl'] > 0).mean() * 100
-    total_trades = len(trades_df)
+    # Process and insert trade data  
+    print(f"\n📈 Processing {len(trades_df)} trades...")
+    for idx, row in trades_df.iterrows():
+        try:
+            # Create trade data
+            trade_data = {
+                'timestamp': pd.to_datetime(row.get('timestamp', datetime.now())),
+                'symbol': row.get('symbol', 'BTC/USDT'),
+                'action': row.get('action', 'BUY'),
+                'quantity': float(row.get('quantity', 0)),
+                'price': float(row.get('price', 0)),
+                'pnl': float(row.get('pnl', 0)),
+                'strategy': row.get('strategy', 'Unknown'),
+                'is_paper_trade': bool(row.get('is_paper_trade', True))
+            }
+            
+            integrator.dashboard_state.log_trade(trade_data)
+        except Exception as e:
+            print(f"   ⚠️ Error processing trade row {idx}: {e}")
     
-    print(f"✅ Dashboard populated successfully!")
-    print(f"📈 Total PnL: ${total_pnl:.2f}")
-    print(f"🎯 Win Rate: {win_rate:.1f}%")
-    print(f"📊 Total Trades: {total_trades}")
-    print(f"💰 Final Equity: ${equity_df['total_equity'].iloc[-1]:.2f}")
+    # Log performance metrics
+    print(f"\n📊 Calculating performance metrics...")
+    integrator.dashboard_state.log_performance_metrics()
     
-    # Create a summary file
-    summary = {
-        'last_updated': datetime.now().isoformat(),
-        'total_trades': int(total_trades),
-        'total_pnl': float(total_pnl),
-        'win_rate': float(win_rate),
-        'final_equity': float(equity_df['total_equity'].iloc[-1]),
-        'initial_equity': float(equity_df['total_equity'].iloc[0]),
-        'period': f"{equity_df['timestamp'].min().date()} to {equity_df['timestamp'].max().date()}"
-    }
+    # Log system health
+    print(f"🏥 Logging system health...")
+    integrator.dashboard_state.log_system_health(
+        status="healthy",
+        cpu_usage=25.5,
+        memory_usage=45.2,
+        active_connections=1
+    )
     
-    with open('dashboard_summary.json', 'w') as f:
-        json.dump(summary, f, indent=2)
+    # Generate summary report
+    print(f"\n📋 Generating dashboard summary...")
+    summary = integrator.dashboard_state.get_dashboard_summary()
     
-    print(f"📋 Summary saved to dashboard_summary.json")
-    print(f"🌐 Your dashboard should now show data at: http://localhost:8501")
+    # Save summary to file
+    with open(DASHBOARD_SUMMARY, 'w') as f:
+        # Convert any datetime objects to strings for JSON serialization
+        json_summary = {}
+        for key, value in summary.items():
+            if isinstance(value, datetime):
+                json_summary[key] = value.isoformat()
+            else:
+                json_summary[key] = value
+        json.dump(json_summary, f, indent=2)
+    
+    print(f"📋 Summary saved to {DASHBOARD_SUMMARY}")
+    
+    print(f"\n✅ Dashboard population complete!")
+    print(f"🚀 Launch dashboard with: streamlit run trading_dashboard.py")
 
 if __name__ == "__main__":
     populate_dashboard() 

@@ -13,6 +13,9 @@ import time
 import numpy as np
 from pathlib import Path
 
+# Import configuration
+from config import Config, DATABASE_PATH
+
 # Configure Streamlit page
 st.set_page_config(
     page_title="🤖 Trading Bot Dashboard",
@@ -46,7 +49,7 @@ st.markdown("""
 @st.cache_data(ttl=30)  # Cache for 30 seconds
 def load_database_data():
     """Load all data from trading dashboard database"""
-    db_path = "trading_dashboard.db"
+    db_path = DATABASE_PATH
     
     if not Path(db_path).exists():
         return {
