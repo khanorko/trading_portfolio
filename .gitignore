@@ -60,7 +60,7 @@ ENV/
 .vscode/
 .idea/
 *.nbconvert
-.DS_Store
+.DS_Store 
 
 # Trading Bot Specific - SENSITIVE FILES
 # API Keys and secrets

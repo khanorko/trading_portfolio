@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from config import Config, DATABASE_PATH, BOT_STATE_FILE
 from state_manager import TradingStateManager, PositionManager
+from strategy_constants import StrategyNames, get_strategy_db_name, validate_strategy_name
 
 class DashboardStateManager(TradingStateManager):
     def __init__(self, state_file=None):
@@ -90,10 +91,18 @@ class DashboardStateManager(TradingStateManager):
         self.logger.info("Dashboard database initialized successfully")
     
     def log_trade(self, trade_data):
-        """Log individual trade to database"""
+        """Log individual trade to database with strategy name validation"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Validate and normalize strategy name
+            strategy_name = trade_data.get('strategy', '')
+            if strategy_name and not validate_strategy_name(strategy_name):
+                self.logger.warning(f"Unknown strategy name: {strategy_name}")
+            
+            # Convert class name to database format if needed
+            db_strategy_name = get_strategy_db_name(strategy_name) if strategy_name else ''
             
             cursor.execute('''
                 INSERT INTO trades 
@@ -102,7 +111,7 @@ class DashboardStateManager(TradingStateManager):
             ''', (
                 trade_data.get('timestamp', datetime.now().isoformat()),
                 trade_data.get('symbol', ''),
-                trade_data.get('strategy', ''),
+                db_strategy_name,
                 trade_data.get('action', ''),
                 trade_data.get('quantity', 0),
                 trade_data.get('price', 0),
@@ -115,13 +124,13 @@ class DashboardStateManager(TradingStateManager):
             
             conn.commit()
             conn.close()
-            self.logger.info(f"Trade logged: {trade_data.get('action')} {trade_data.get('symbol')}")
+            self.logger.info(f"Trade logged: {trade_data.get('action')} {trade_data.get('symbol')} ({db_strategy_name})")
             
         except Exception as e:
             self.logger.error(f"Failed to log trade: {e}")
     
     def log_equity_snapshot(self, position_manager, current_prices=None):
-        """Log current equity snapshot"""
+        """Log current equity snapshot with improved strategy handling"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -140,10 +149,20 @@ class DashboardStateManager(TradingStateManager):
                 position_manager.update_unrealized_pnl(current_prices)
                 for pos_id, pos in open_positions.items():
                     unrealized_pnl += pos.get('unrealized_pnl', 0)
-                    if pos.get('strategy') == 'ICHIMOKU':
-                        ichimoku_equity += pos.get('quantity', 0) * current_prices.get(pos.get('symbol', ''), 0)
-                    elif pos.get('strategy') == 'REVERSAL':
-                        reversal_equity += pos.get('quantity', 0) * current_prices.get(pos.get('symbol', ''), 0)
+                    
+                    # Use strategy constants for consistent comparison
+                    strategy = pos.get('strategy', '')
+                    db_strategy = get_strategy_db_name(strategy)
+                    
+                    position_value = pos.get('quantity', 0) * current_prices.get(pos.get('symbol', ''), 0)
+                    
+                    if db_strategy == StrategyNames.ICHIMOKU_DB:
+                        ichimoku_equity += position_value
+                    elif db_strategy == StrategyNames.REVERSAL_DB:
+                        reversal_equity += position_value
+                    else:
+                        # Handle unknown strategies gracefully
+                        self.logger.warning(f"Unknown strategy in position: {strategy}")
             
             # Get previous day's equity for daily P&L calculation
             cursor.execute('''
@@ -154,9 +173,9 @@ class DashboardStateManager(TradingStateManager):
             previous_day_result = cursor.fetchone()
             previous_day_equity = previous_day_result[0] if previous_day_result else 0
             
-            # For demo purposes, use a base equity (this should come from actual account balance)
-            base_equity = 4000  # This should be replaced with actual cash + position value
-            total_equity = base_equity + unrealized_pnl
+            # Use configured initial capital instead of hardcoded value
+            base_equity = Config.INITIAL_CAPITAL + unrealized_pnl
+            total_equity = base_equity
             daily_pnl = total_equity - previous_day_equity if previous_day_equity > 0 else 0
             
             cursor.execute('''
@@ -180,6 +199,32 @@ class DashboardStateManager(TradingStateManager):
         except Exception as e:
             self.logger.error(f"Failed to log equity snapshot: {e}")
     
+    def log_equity_snapshot_direct(self, equity_data):
+        """Log equity snapshot directly from provided data (for populate_dashboard.py)"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO equity_snapshots 
+                (timestamp, total_equity, ichimoku_equity, reversal_equity, open_positions, unrealized_pnl, daily_pnl)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                equity_data.get('timestamp', datetime.now().isoformat()),
+                equity_data.get('total_equity', 0),
+                equity_data.get('ichimoku_equity', 0),
+                equity_data.get('reversal_equity', 0),
+                equity_data.get('open_positions', 0),
+                equity_data.get('unrealized_pnl', 0),
+                equity_data.get('daily_pnl', 0)
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to log equity snapshot directly: {e}")
+    
     def log_performance_metrics(self):
         """Calculate and log performance metrics"""
         try:
@@ -188,13 +233,13 @@ class DashboardStateManager(TradingStateManager):
             
             # Get trade statistics
             cursor.execute('SELECT COUNT(*) FROM trades WHERE action = "SELL"')
-            total_trades = cursor.fetchone()[0]
+            total_trades = cursor.fetchone()[0] or 0
             
             cursor.execute('SELECT COUNT(*) FROM trades WHERE action = "SELL" AND pnl > 0')
-            winning_trades = cursor.fetchone()[0]
+            winning_trades = cursor.fetchone()[0] or 0
             
             cursor.execute('SELECT COUNT(*) FROM trades WHERE action = "SELL" AND pnl <= 0')
-            losing_trades = cursor.fetchone()[0]
+            losing_trades = cursor.fetchone()[0] or 0
             
             win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
             
@@ -255,8 +300,8 @@ class DashboardStateManager(TradingStateManager):
         except Exception as e:
             self.logger.error(f"Failed to log performance metrics: {e}")
     
-    def log_system_health(self, status="running", api_connected=True, error_count=0):
-        """Log system health status"""
+    def log_system_health(self, status="running", api_connected=True, error_count=0, cpu_usage=0.0, memory_usage=0.0, active_connections=0):
+        """Log system health status with enhanced metrics"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -314,7 +359,8 @@ class DashboardStateManager(TradingStateManager):
             return {
                 'metrics': latest_metrics,
                 'equity': latest_equity,
-                'health': latest_health
+                'health': latest_health,
+                'last_updated': datetime.now().isoformat()
             }
             
         except Exception as e:
@@ -326,11 +372,11 @@ if __name__ == "__main__":
     # Test the enhanced state manager
     dashboard_state = DashboardStateManager()
     
-    # Example trade logging
+    # Example trade logging with strategy constants
     sample_trade = {
         'timestamp': datetime.now().isoformat(),
         'symbol': 'BTC/USDT',
-        'strategy': 'ICHIMOKU',
+        'strategy': StrategyNames.ICHIMOKU_TREND,  # Use constant instead of hardcoded string
         'action': 'BUY',
         'quantity': 0.1,
         'price': 45000,
