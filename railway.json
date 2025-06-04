@@ -1,1 +1,1 @@
-{"build":{"builder":"NIXPACKS"},"deploy":{"startCommand":"streamlit run simple_test.py --server.port $PORT --server.address 0.0.0.0"}}
+{"build":{"builder":"NIXPACKS"},"deploy":{"startCommand":"streamlit run trading_dashboard.py --server.port $PORT --server.address 0.0.0.0"}}
