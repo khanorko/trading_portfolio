@@ -93,8 +93,8 @@ class Config:
                 errors.append("STREAMLIT_PORT must be between 1024 and 65535")
             
             # Validate file paths
-            if not cls.PROJECT_ROOT.exists():
-                errors.append(f"Project root directory does not exist: {cls.PROJECT_ROOT}")
+            if not PROJECT_ROOT.exists():
+                errors.append(f"Project root directory does not exist: {PROJECT_ROOT}")
             
             if errors:
                 error_msg = "Configuration validation failed:\n" + "\n".join(f"  - {error}" for error in errors)
