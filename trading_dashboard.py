@@ -176,12 +176,18 @@ def main():
     st.sidebar.header("🎛️ Dashboard Controls")
     
     # Auto-refresh settings
-    auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh", value=True)
+    auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh", value=False)  # Default to False
     refresh_interval = st.sidebar.selectbox("Refresh Interval", [15, 30, 60, 120], index=1)
     
+    # Use proper auto-refresh with session state timing
     if auto_refresh:
-        time.sleep(refresh_interval)
-        st.rerun()
+        if 'last_refresh' not in st.session_state:
+            st.session_state.last_refresh = time.time()
+        
+        if time.time() - st.session_state.last_refresh > refresh_interval:
+            st.session_state.last_refresh = time.time()
+            st.cache_data.clear()
+            st.rerun()
     
     # Manual refresh
     if st.sidebar.button("🔄 Refresh Now"):
