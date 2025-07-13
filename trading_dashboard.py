@@ -226,7 +226,7 @@ def main():
 
     if st.sidebar.button("🛑 Stop Bot"):
         if st.session_state.bot_running:
-            st.session_state.bot.stop()  # Use the new stop method
+            st.session_state.bot.running = False  # Assumes bot has a 'running' flag
             st.session_state.bot_thread.join(timeout=10)  # Wait for thread to stop
             st.session_state.bot_running = False
             bot_status.warning("Bot stopped.")
