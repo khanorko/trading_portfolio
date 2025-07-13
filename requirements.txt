@@ -6,3 +6,4 @@ streamlit>=1.28.0
 plotly>=5.15.0
 requests>=2.31.0
 ta>=0.10.2
+pybit>=5.0.0
