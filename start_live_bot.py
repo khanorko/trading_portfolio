@@ -5,6 +5,7 @@ Simple startup script for the live trading bot
 import os
 import sys
 from pathlib import Path
+from config import Config
 
 def main():
     print("🚀 Starting Live Trading Bot with State Persistence")
@@ -65,6 +66,13 @@ def main():
     print("   4. Use Ctrl+C to stop gracefully")
     print("   5. Check trading_bot.log for detailed logs")
     print()
+    
+    # Safety check for live mode
+    if not Config.BYBIT_TESTNET:
+        response = input("⚠️ WARNING: This is LIVE trading with real money! Are you sure? (y/N): ").strip().lower()
+        if response not in ['y', 'yes']:
+            print("👋 Startup cancelled")
+            return
     
     # Ask for confirmation
     response = input("Ready to start the live trading bot? (y/N): ").strip().lower()

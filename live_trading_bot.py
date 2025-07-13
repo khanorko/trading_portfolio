@@ -13,6 +13,7 @@ from typing import Dict, Any
 from strategies import IchimokuTrend, RsiReversal
 from exchange_handler import initialize_exchange, execute_trade, fetch_historical_ohlcv
 from state_manager import TradingStateManager, PositionManager
+from config import Config
 
 # Configure logging
 logging.basicConfig(
@@ -33,11 +34,11 @@ class LiveTradingBot:
         self.timeframe = "4h"
         self.check_interval = 300  # Check every 5 minutes
         
-        # Trading parameters
-        self.trading_fee_rate = 0.001
-        self.slippage_rate = 0.0005
-        self.min_profit_threshold = 0.005
-        self.position_size_pct = 0.015  # 1.5% risk per trade
+        # Trading parameters from config
+        self.trading_fee_rate = Config.TRADING_FEE_RATE
+        self.slippage_rate = Config.SLIPPAGE_RATE
+        self.min_profit_threshold = Config.MIN_PROFIT_THRESHOLD
+        self.position_size_pct = Config.POSITION_SIZE_PCT  # 1.5% risk per trade
         
         # Initialize components
         self.state_manager = TradingStateManager("live_bot_state.json")
