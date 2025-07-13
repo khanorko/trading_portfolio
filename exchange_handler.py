@@ -178,28 +178,45 @@ def _initialize_alpaca(api_key=None, secret_key=None, paper_mode=True) -> Tuple[
         raise ExchangeError(f"Alpaca initialization failed: {e}")
 
 @retry_on_failure(max_retries=2, delay=0.5)
-def execute_trade(exchange, symbol: str, side: str, amount: float, price: float = None, order_type: str = "market") -> Optional[Dict[str, Any]]:
+def execute_trade(symbol: str, side: str, amount_base_currency_to_trade: float, 
+                 exchange_obj=None, exchange=None, price: float = None, 
+                 order_type: str = "market", current_price: float = None, 
+                 sim_timestamp=None) -> Optional[Dict[str, Any]]:
     """
-    Execute a trade with comprehensive error handling
+    Execute a trade with comprehensive error handling and validation
+    
+    Args:
+        symbol: Trading pair symbol (e.g., 'BTC/USDT')
+        side: 'buy' or 'sell'
+        amount_base_currency_to_trade: Amount to trade in base currency
+        exchange_obj: Exchange object (preferred parameter name)
+        exchange: Exchange object (legacy parameter name)
+        price: Limit price (optional for market orders)
+        order_type: 'market' or 'limit'
+        current_price: Current market price (for logging)
+        sim_timestamp: Simulation timestamp (for backtesting)
     
     Returns:
-        Order information dict or None on failure
+        Order receipt dictionary or None on failure
     """
     try:
-        # Input validation
-        if not exchange:
-            raise ExchangeError("Exchange object is None")
+        # Use exchange_obj if provided, otherwise fall back to exchange
+        exchange_instance = exchange_obj or exchange
         
-        # Validate symbol format
+        if not exchange_instance:
+            raise ExchangeError("No exchange object provided")
+        
+        # Validate and sanitize symbol
         try:
             symbol = Config.sanitize_symbol(symbol)
         except ConfigValidationError as e:
             raise ExchangeError(f"Invalid symbol: {e}")
         
-        if side not in ['buy', 'sell']:
+        # Validate parameters
+        if side.lower() not in ['buy', 'sell']:
             raise ExchangeError(f"Invalid side: {side}. Must be 'buy' or 'sell'")
         
-        if not isinstance(amount, (int, float)) or amount <= 0:
+        if not isinstance(amount_base_currency_to_trade, (int, float)) or amount_base_currency_to_trade <= 0:
             raise ExchangeError("Amount must be a positive number")
         
         if price is not None and (not isinstance(price, (int, float)) or price <= 0):
@@ -208,14 +225,14 @@ def execute_trade(exchange, symbol: str, side: str, amount: float, price: float 
         if order_type not in ['market', 'limit']:
             raise ExchangeError(f"Invalid order type: {order_type}. Must be 'market' or 'limit'")
         
-        logger.info(f"🔄 Executing {side.upper()} order: {amount} {symbol} @ {price or 'market'}")
+        logger.info(f"🔄 Executing {side.upper()} order: {amount_base_currency_to_trade} {symbol} @ {price or current_price or 'market'}")
         
         # Prepare order parameters
         order_params = {
             'symbol': symbol,
             'type': order_type,
             'side': side,
-            'amount': amount,
+            'amount': amount_base_currency_to_trade,
         }
         
         if order_type == 'limit' and price is not None:
@@ -223,7 +240,7 @@ def execute_trade(exchange, symbol: str, side: str, amount: float, price: float 
         
         # Execute order
         try:
-            order = exchange.create_order(**order_params)
+            order = exchange_instance.create_order(**order_params)
             logger.info(f"✅ Order executed successfully: {order.get('id', 'N/A')}")
             return order
             
