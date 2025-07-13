@@ -195,6 +195,52 @@ def main():
         index=1
     )
     
+    # Bot Control Section
+    st.sidebar.header("🤖 Bot Control")
+    bot_status = st.sidebar.empty()  # Placeholder for status
+
+    # Global bot instance and thread (use session state to persist)
+    if 'bot' not in st.session_state:
+        st.session_state.bot = None
+    if 'bot_thread' not in st.session_state:
+        st.session_state.bot_thread = None
+    if 'bot_running' not in st.session_state:
+        st.session_state.bot_running = False
+
+    # Start/Stop Buttons
+    if st.sidebar.button("🚀 Start Live Bot"):
+        if not st.session_state.bot_running:
+            from live_trading_bot import LiveTradingBot
+            import threading
+            st.session_state.bot = LiveTradingBot()
+            st.session_state.bot_thread = threading.Thread(target=st.session_state.bot.run)
+            st.session_state.bot_thread.start()
+            st.session_state.bot_running = True
+            bot_status.success("Bot started! Fetching real-time data...")
+
+    if st.sidebar.button("🛑 Stop Bot"):
+        if st.session_state.bot_running:
+            st.session_state.bot.running = False  # Assumes bot has a 'running' flag
+            st.session_state.bot_thread.join(timeout=10)  # Wait for thread to stop
+            st.session_state.bot_running = False
+            bot_status.warning("Bot stopped.")
+
+    # Display Bot Status
+    if st.session_state.bot_running:
+        bot_status.success("Bot Running (Live Mode)")
+    else:
+        bot_status.error("Bot Stopped")
+
+    # Live Log Viewer (tail last 10 lines)
+    st.sidebar.subheader("📜 Live Logs")
+    log_placeholder = st.sidebar.empty()
+    try:
+        with open('trading_bot.log', 'r') as log_file:
+            logs = log_file.readlines()[-10:]
+            log_placeholder.text(''.join(logs))
+    except FileNotFoundError:
+        log_placeholder.text("No logs available yet.")
+    
     # Load data
     data = load_database_data()
     
@@ -468,52 +514,6 @@ def main():
         st.dataframe(styled_trades, use_container_width=True, height=400)
     else:
         st.info("No trades recorded yet")
-    
-    # Add Bot Control Section
-    st.sidebar.header("🤖 Bot Control")
-    bot_status = st.sidebar.empty()  # Placeholder for status
-
-    # Global bot instance and thread (use session state to persist)
-    if 'bot' not in st.session_state:
-        st.session_state.bot = None
-    if 'bot_thread' not in st.session_state:
-        st.session_state.bot_thread = None
-    if 'bot_running' not in st.session_state:
-        st.session_state.bot_running = False
-
-    # Start/Stop Buttons
-    if st.sidebar.button("🚀 Start Live Bot"):
-        if not st.session_state.bot_running:
-            from live_trading_bot import LiveTradingBot
-            import threading
-            st.session_state.bot = LiveTradingBot()
-            st.session_state.bot_thread = threading.Thread(target=st.session_state.bot.run)
-            st.session_state.bot_thread.start()
-            st.session_state.bot_running = True
-            bot_status.success("Bot started! Fetching real-time data...")
-
-    if st.sidebar.button("🛑 Stop Bot"):
-        if st.session_state.bot_running:
-            st.session_state.bot.running = False  # Assumes bot has a 'running' flag
-            st.session_state.bot_thread.join(timeout=10)  # Wait for thread to stop
-            st.session_state.bot_running = False
-            bot_status.warning("Bot stopped.")
-
-    # Display Bot Status
-    if st.session_state.bot_running:
-        bot_status.success("Bot Running (Live Mode)")
-    else:
-        bot_status.error("Bot Stopped")
-
-    # Live Log Viewer (tail last 10 lines)
-    st.sidebar.subheader("📜 Live Logs")
-    log_placeholder = st.sidebar.empty()
-    try:
-        with open('trading_bot.log', 'r') as log_file:
-            logs = log_file.readlines()[-10:]
-            log_placeholder.text(''.join(logs))
-    except FileNotFoundError:
-        log_placeholder.text("No logs available yet.")
 
     # System information in sidebar
     st.sidebar.markdown("---")
