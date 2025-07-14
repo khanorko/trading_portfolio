@@ -41,7 +41,7 @@ class Config:
     MIN_PROFIT_THRESHOLD = float(os.getenv('MIN_PROFIT_THRESHOLD', 0.005))
     
     # Exchange settings
-    EXCHANGE_NAME = os.getenv('EXCHANGE_NAME', 'bybit')  # Default to bybit
+    EXCHANGE_NAME = os.getenv('EXCHANGE_NAME', 'binance')  # Default to binance
     BYBIT_TESTNET = os.getenv('BYBIT_TESTNET', 'true').lower() == 'true'
     BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', 'true').lower() == 'true'
     
