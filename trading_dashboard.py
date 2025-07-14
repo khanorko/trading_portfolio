@@ -296,7 +296,14 @@ def main():
     # Force cache clear button for debugging
     if st.sidebar.button("🧹 Clear All Cache"):
         st.cache_data.clear()
-        st.session_state.clear()
+        st.cache_resource.clear()
+        # Clear all session state except for essential keys
+        keys_to_keep = ['bot', 'bot_thread', 'bot_running']
+        for key in list(st.session_state.keys()):
+            if key not in keys_to_keep:
+                del st.session_state[key]
+        st.success("✅ Cache cleared successfully!")
+        time.sleep(1)  # Give user time to see the message
         st.rerun()
     
     # Time range selector
@@ -383,40 +390,63 @@ def main():
     # Calculate metrics
     metrics = calculate_metrics(data)
     
-    # Status indicator
-    if not data['health'].empty:
-        latest_health = data['health'].iloc[0]
-        last_update = pd.to_datetime(latest_health['timestamp'])
-        minutes_ago = (datetime.now() - last_update).total_seconds() / 60
-        
-        if minutes_ago < 5:
-            status = "🟢 Bot Running (Live Mode)"
-            status_color = "positive"
-        elif minutes_ago < 15:
-            status = "🟡 Bot Running (Warning)"
-            status_color = "neutral"
-        else:
-            status = "🔴 Bot Offline"
-            status_color = "negative"
-    elif not data['equity'].empty:
-        # Fallback: check equity data if no health data
-        latest_equity = data['equity'].iloc[0]
-        last_update = pd.to_datetime(latest_equity['timestamp'])
-        minutes_ago = (datetime.now() - last_update).total_seconds() / 60
-        
-        if minutes_ago < 10:
-            status = "🟢 Bot Running (Simulation Mode)"
-            status_color = "positive"
-        elif minutes_ago < 30:
-            status = "🟡 Bot Running (Delayed)"
-            status_color = "neutral"
-        else:
-            status = "🔴 Bot Offline"
-            status_color = "negative"
-    else:
-        status = "❓ Unknown"
-        status_color = "neutral"
+    # Status indicator - improved detection
+    status = "🔴 Bot Offline"
+    status_color = "negative"
+    minutes_ago = 0
+    
+    # Check if bot is actually running via session state or process check
+    dashboard_bot_running = st.session_state.get('bot_running', False)
+    
+    # Check if external bot process is running
+    external_bot_running = False
+    try:
+        import subprocess
+        result = subprocess.run(['pgrep', '-f', 'live_trading_bot.py'], 
+                              capture_output=True, text=True)
+        external_bot_running = bool(result.stdout.strip())
+    except:
+        pass
+    
+    if dashboard_bot_running:
+        status = "🟢 Bot Running (Dashboard Control)"
+        status_color = "positive"
         minutes_ago = 0
+    elif external_bot_running:
+        status = "🟢 Bot Running (External Process)"
+        status_color = "positive"
+        minutes_ago = 0
+    else:
+        # Check via data freshness
+        if not data['health'].empty:
+            latest_health = data['health'].iloc[0]
+            last_update = pd.to_datetime(latest_health['timestamp'])
+            minutes_ago = (datetime.now() - last_update).total_seconds() / 60
+            
+            if minutes_ago < 5:
+                status = "🟢 Bot Running (Live Mode)"
+                status_color = "positive"
+            elif minutes_ago < 15:
+                status = "🟡 Bot Running (Warning)"
+                status_color = "neutral"
+            else:
+                status = "🔴 Bot Offline"
+                status_color = "negative"
+        elif not data['equity'].empty:
+            # Fallback: check equity data if no health data
+            latest_equity = data['equity'].iloc[0]
+            last_update = pd.to_datetime(latest_equity['timestamp'])
+            minutes_ago = (datetime.now() - last_update).total_seconds() / 60
+            
+            if minutes_ago < 10:
+                status = "🟢 Bot Running (Data Mode)"
+                status_color = "positive"
+            elif minutes_ago < 30:
+                status = "🟡 Bot Running (Delayed)"
+                status_color = "neutral"
+            else:
+                status = "🔴 Bot Offline"
+                status_color = "negative"
     
     # Top-level status
     col_status1, col_status2, col_status3 = st.columns([2, 2, 1])
