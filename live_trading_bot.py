@@ -49,16 +49,29 @@ class LiveTradingBot:
         self.exchange = None
         self.running = False
         
-        # Setup signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
+        # Setup signal handlers for graceful shutdown (only works in main thread)
+        try:
+            signal.signal(signal.SIGINT, self.signal_handler)
+            signal.signal(signal.SIGTERM, self.signal_handler)
+        except ValueError:
+            # Signal handlers can only be set in main thread
+            # When running in Streamlit, we'll handle shutdown differently
+            logger.info("Signal handlers not available (not in main thread)")
     
     def signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
         logger.info(f"Received signal {signum}. Shutting down gracefully...")
         self.running = False
         self.save_state()
-        sys.exit(0)
+        # Only exit if running as standalone script
+        if __name__ == "__main__":
+            sys.exit(0)
+    
+    def stop(self):
+        """Stop the bot gracefully (for Streamlit interface)"""
+        logger.info("Stopping bot via Streamlit interface...")
+        self.running = False
+        self.save_state()
     
     def initialize(self):
         """Initialize exchange and restore state"""
