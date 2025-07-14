@@ -143,7 +143,18 @@ def _initialize_bybit(api_key=None, secret_key=None, paper_mode=True) -> Tuple[O
             exchange.load_markets()
             logger.info("✅ Bybit markets loaded successfully")
         except Exception as e:
-            raise RetryableExchangeError(f"Failed to load Bybit markets: {e}")
+            error_msg = str(e).lower()
+            # Check for geographic blocking
+            if "403" in error_msg and "cloudfront" in error_msg:
+                raise ExchangeError("Geographic blocking detected: Bybit API is not accessible from this region. Using simulation mode.")
+            # Check for other 403 errors
+            elif "403" in error_msg:
+                raise ExchangeError("Access forbidden: Invalid API credentials or region blocked. Using simulation mode.")
+            # Check for other HTTP errors that shouldn't be retried
+            elif any(code in error_msg for code in ["401", "404", "429"]):
+                raise ExchangeError(f"Non-retryable API error: {e}")
+            else:
+                raise RetryableExchangeError(f"Failed to load Bybit markets: {e}")
         
         # Fetch account balance
         balance = 0.0
@@ -159,6 +170,9 @@ def _initialize_bybit(api_key=None, secret_key=None, paper_mode=True) -> Tuple[O
     except (ExchangeError, RetryableExchangeError):
         raise
     except ccxt.NetworkError as e:
+        error_msg = str(e).lower()
+        if "403" in error_msg and "cloudfront" in error_msg:
+            raise ExchangeError("Geographic blocking detected: Bybit API is not accessible from this region. Using simulation mode.")
         raise RetryableExchangeError(f"Network error connecting to Bybit: {e}")
     except ccxt.ExchangeError as e:
         raise ExchangeError(f"Bybit exchange error: {e}")

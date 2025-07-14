@@ -95,8 +95,16 @@ class LiveTradingBot:
                 logger.info(f"Exchange initialized. Balance: {balance:.2f} USDT")
                 
         except Exception as e:
-            logger.error(f"Exchange initialization failed: {e}")
-            logger.info("Continuing in simulation mode with mock data")
+            from exchange_handler import ExchangeError
+            if isinstance(e, ExchangeError):
+                # Non-retryable error (geographic blocking, invalid credentials, etc.)
+                logger.warning(f"Exchange not available: {e}")
+                logger.info("Continuing in simulation mode with mock data")
+            else:
+                # Other errors
+                logger.error(f"Exchange initialization failed: {e}")
+                logger.info("Continuing in simulation mode with mock data")
+            
             self.exchange = None
             balance = 4000.0  # Mock balance
         
