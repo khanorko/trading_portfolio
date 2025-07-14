@@ -213,26 +213,44 @@ class LiveTradingBot:
         periods = int(lookback_hours / 4)
         timestamps = pd.date_range(start=start_time, end=end_time, periods=periods)
         
-        # Generate realistic price data starting from ~$95,000
-        np.random.seed(42)  # For reproducible results
+        # Generate more dynamic price data that can trigger signals
+        # Use current time as seed for some variation while keeping reproducibility
+        seed = int(time.time()) % 1000
+        np.random.seed(seed)
+        
         base_price = 95000.0
         
-        # Generate price movements
-        returns = np.random.normal(0.001, 0.02, len(timestamps))  # Small positive drift with volatility
-        prices = [base_price]
+        # Create market scenarios that might trigger signals
+        scenario = seed % 3
         
-        for i in range(1, len(timestamps)):
-            new_price = prices[-1] * (1 + returns[i])
-            prices.append(new_price)
+        if scenario == 0:
+            # Trending market (might trigger Ichimoku)
+            trend = np.linspace(0, 3000, len(timestamps))  # $3000 uptrend
+            volatility = 300
+        elif scenario == 1:
+            # Ranging market with reversals (might trigger RSI)
+            trend = 1000 * np.sin(np.linspace(0, 4*np.pi, len(timestamps)))  # Oscillating
+            volatility = 200
+        else:
+            # Mixed market
+            trend = np.cumsum(np.random.normal(0, 50, len(timestamps)))  # Random walk
+            volatility = 250
+        
+        # Generate price movements
+        noise = np.random.normal(0, volatility, len(timestamps))
+        prices = base_price + trend + noise
+        
+        # Ensure prices are positive
+        prices = np.maximum(prices, base_price * 0.5)
         
         # Create OHLCV data
         data = []
         for i, (timestamp, close) in enumerate(zip(timestamps, prices)):
             # Generate realistic OHLC from close price
-            volatility = close * 0.01  # 1% volatility
-            high = close + np.random.uniform(0, volatility)
-            low = close - np.random.uniform(0, volatility)
-            open_price = close + np.random.uniform(-volatility/2, volatility/2)
+            daily_volatility = close * 0.015  # 1.5% daily volatility
+            high = close + np.random.uniform(0, daily_volatility)
+            low = close - np.random.uniform(0, daily_volatility)
+            open_price = close + np.random.uniform(-daily_volatility/2, daily_volatility/2)
             volume = np.random.uniform(100, 1000)
             
             data.append({
@@ -249,7 +267,8 @@ class LiveTradingBot:
         for strategy in self.strategies:
             strategy.precompute_indicators(df)
         
-        logger.info(f"Generated {len(df)} mock candles. Latest price: ${df['close'].iloc[-1]:.2f}")
+        scenario_names = ["Trending", "Ranging", "Mixed"]
+        logger.info(f"Generated {len(df)} mock candles ({scenario_names[scenario]} market). Price: ${df.iloc[0]['close']:.2f} -> ${df.iloc[-1]['close']:.2f}")
         return df
     
     def check_signals_and_trade(self, df: pd.DataFrame):
