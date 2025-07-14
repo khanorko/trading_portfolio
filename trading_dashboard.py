@@ -47,7 +47,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=10)  # Cache for 10 seconds
+@st.cache_data(ttl=5)  # Cache for 5 seconds
 def load_database_data():
     """Load data from SQLite database with enhanced error handling"""
     try:
@@ -291,6 +291,12 @@ def main():
     # Manual refresh
     if st.sidebar.button("🔄 Refresh Now"):
         st.cache_data.clear()
+        st.rerun()
+    
+    # Force cache clear button for debugging
+    if st.sidebar.button("🧹 Clear All Cache"):
+        st.cache_data.clear()
+        st.session_state.clear()
         st.rerun()
     
     # Time range selector
