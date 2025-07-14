@@ -615,7 +615,7 @@ def main():
             color = 'color: green' if val > 0 else 'color: red'
             return color
         
-        styled_trades = display_trades.style.applymap(color_pnl, subset=['P&L'])
+        styled_trades = display_trades.style.map(color_pnl, subset=['P&L'])
         st.dataframe(styled_trades, use_container_width=True, height=400)
     else:
         st.info("No trades recorded yet")
@@ -634,7 +634,6 @@ def main():
     db_stats = {
         'Trades': len(data['trades']),
         'Equity Snapshots': len(data['equity']),
-        'Performance Records': len(data['performance']),
         'Health Checks': len(data['health'])
     }
     
