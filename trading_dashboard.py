@@ -47,7 +47,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=30)  # Cache for 30 seconds
+@st.cache_data(ttl=10)  # Cache for 10 seconds
 def load_database_data():
     """Load data from SQLite database with enhanced error handling"""
     try:
@@ -86,8 +86,8 @@ def load_database_data():
         
         conn.close()
         
-        # Auto-generate demo data if no trades exist and we have very little equity data
-        if trades_df.empty and len(equity_df) < 10:
+        # Auto-generate demo data if no trades exist (regardless of equity data)
+        if trades_df.empty:
             st.info("🎯 No trading data found. Generating demo data for dashboard demonstration...")
             generate_demo_data_automatically()
             
@@ -384,13 +384,28 @@ def main():
         minutes_ago = (datetime.now() - last_update).total_seconds() / 60
         
         if minutes_ago < 5:
-            status = "🟢 Online"
+            status = "🟢 Bot Running (Live Mode)"
             status_color = "positive"
         elif minutes_ago < 15:
-            status = "🟡 Warning"
+            status = "🟡 Bot Running (Warning)"
             status_color = "neutral"
         else:
-            status = "🔴 Offline"
+            status = "🔴 Bot Offline"
+            status_color = "negative"
+    elif not data['equity'].empty:
+        # Fallback: check equity data if no health data
+        latest_equity = data['equity'].iloc[0]
+        last_update = pd.to_datetime(latest_equity['timestamp'])
+        minutes_ago = (datetime.now() - last_update).total_seconds() / 60
+        
+        if minutes_ago < 10:
+            status = "🟢 Bot Running (Simulation Mode)"
+            status_color = "positive"
+        elif minutes_ago < 30:
+            status = "🟡 Bot Running (Delayed)"
+            status_color = "neutral"
+        else:
+            status = "🔴 Bot Offline"
             status_color = "negative"
     else:
         status = "❓ Unknown"

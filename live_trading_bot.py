@@ -484,6 +484,15 @@ class LiveTradingBot:
                     current_positions = self.position_manager.get_open_positions()
                     self.dashboard_state.log_equity_snapshot(self.position_manager, {self.symbol: float(current_price)})
                 
+                # Log system health for dashboard
+                api_connected = self.exchange is not None
+                self.dashboard_state.log_system_health(
+                    status="running", 
+                    api_connected=api_connected,
+                    error_count=0,
+                    active_connections=len(self.position_manager.get_open_positions())
+                )
+                
                 # Save state periodically
                 self.save_state()
                 
