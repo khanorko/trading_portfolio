@@ -13,6 +13,7 @@ from typing import Dict, Any
 from strategies import IchimokuTrend, RsiReversal
 from exchange_handler import initialize_exchange, execute_trade, fetch_historical_ohlcv
 from state_manager import TradingStateManager, PositionManager
+from enhanced_state_manager import DashboardStateManager
 from config import Config
 
 # Configure logging
@@ -42,6 +43,7 @@ class LiveTradingBot:
         
         # Initialize components
         self.state_manager = TradingStateManager("live_bot_state.json")
+        self.dashboard_state = DashboardStateManager()
         self.position_manager = PositionManager()
         self.strategies = [IchimokuTrend(), RsiReversal()]
         
@@ -250,6 +252,18 @@ class LiveTradingBot:
                         entry_time=timestamp
                     )
                     
+                    # Log trade to dashboard
+                    trade_data = {
+                        'symbol': self.symbol,
+                        'strategy': strategy_name,
+                        'side': 'buy',
+                        'quantity': quantity,
+                        'price': price,
+                        'timestamp': timestamp,
+                        'position_id': pos_id
+                    }
+                    self.dashboard_state.log_trade(trade_data)
+                    
                     logger.info(f"✅ Position opened: {pos_id}")
                     self.save_state()  # Save state after trade
                 else:
@@ -278,6 +292,19 @@ class LiveTradingBot:
             if trade_result:
                 # Close position
                 pnl = self.position_manager.close_position(pos_id, price, timestamp)
+                
+                # Log trade to dashboard
+                trade_data = {
+                    'symbol': self.symbol,
+                    'strategy': strategy_name,
+                    'side': 'sell',
+                    'quantity': quantity,
+                    'price': price,
+                    'timestamp': timestamp,
+                    'position_id': pos_id,
+                    'pnl': pnl
+                }
+                self.dashboard_state.log_trade(trade_data)
                 
                 logger.info(f"✅ Position closed: {pos_id}, P&L: ${pnl:.2f}")
                 self.save_state()  # Save state after trade
@@ -332,6 +359,12 @@ class LiveTradingBot:
                 
                 # Check signals and trade
                 self.check_signals_and_trade(df)
+                
+                # Log equity snapshot for dashboard
+                if len(df) > 0:
+                    current_price = df.iloc[-1]['close']
+                    current_positions = self.position_manager.get_open_positions()
+                    self.dashboard_state.log_equity_snapshot(self.position_manager, current_price)
                 
                 # Save state periodically
                 self.save_state()
