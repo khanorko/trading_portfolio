@@ -12,6 +12,7 @@ import json
 import time
 import numpy as np
 from pathlib import Path
+import os
 
 # Import configuration
 from config import Config, DATABASE_PATH
@@ -48,61 +49,159 @@ st.markdown("""
 
 @st.cache_data(ttl=30)  # Cache for 30 seconds
 def load_database_data():
-    """Load all data from trading dashboard database"""
-    db_path = DATABASE_PATH
-    
-    if not Path(db_path).exists():
-        return {
-            'trades': pd.DataFrame(),
-            'equity': pd.DataFrame(),
-            'performance': pd.DataFrame(),
-            'health': pd.DataFrame()
-        }
-    
+    """Load data from SQLite database with enhanced error handling"""
     try:
-        conn = sqlite3.connect(db_path)
+        if not os.path.exists(DATABASE_PATH):
+            st.error(f"Database not found at {DATABASE_PATH}")
+            return {'trades': pd.DataFrame(), 'equity': pd.DataFrame(), 'health': pd.DataFrame()}
+        
+        conn = sqlite3.connect(DATABASE_PATH)
         
         # Load trades
-        trades_df = pd.read_sql_query(
-            "SELECT * FROM trades ORDER BY timestamp DESC LIMIT 200", 
-            conn
-        )
+        trades_query = """
+        SELECT * FROM trades 
+        ORDER BY timestamp DESC
+        """
+        trades_df = pd.read_sql_query(trades_query, conn)
         
         # Load equity snapshots
-        equity_df = pd.read_sql_query(
-            "SELECT * FROM equity_snapshots ORDER BY timestamp DESC LIMIT 1000", 
-            conn
-        )
+        equity_query = """
+        SELECT * FROM equity_snapshots 
+        ORDER BY timestamp DESC
+        LIMIT 1000
+        """
+        equity_df = pd.read_sql_query(equity_query, conn)
         
-        # Load performance metrics
-        performance_df = pd.read_sql_query(
-            "SELECT * FROM performance_metrics ORDER BY timestamp DESC LIMIT 100", 
-            conn
-        )
-        
-        # Load system health
-        health_df = pd.read_sql_query(
-            "SELECT * FROM system_health ORDER BY timestamp DESC LIMIT 100", 
-            conn
-        )
+        # Load system health (if table exists)
+        health_df = pd.DataFrame()
+        try:
+            health_query = """
+            SELECT * FROM system_health 
+            ORDER BY timestamp DESC 
+            LIMIT 10
+            """
+            health_df = pd.read_sql_query(health_query, conn)
+        except:
+            pass  # Table might not exist yet
         
         conn.close()
+        
+        # Auto-generate demo data if no trades exist and we have very little equity data
+        if trades_df.empty and len(equity_df) < 10:
+            st.info("🎯 No trading data found. Generating demo data for dashboard demonstration...")
+            generate_demo_data_automatically()
+            
+            # Reload data after generating demo data
+            conn = sqlite3.connect(DATABASE_PATH)
+            trades_df = pd.read_sql_query(trades_query, conn)
+            equity_df = pd.read_sql_query(equity_query, conn)
+            conn.close()
         
         return {
             'trades': trades_df,
             'equity': equity_df,
-            'performance': performance_df,
             'health': health_df
         }
         
     except Exception as e:
-        st.error(f"Database error: {e}")
-        return {
-            'trades': pd.DataFrame(),
-            'equity': pd.DataFrame(),
-            'performance': pd.DataFrame(),
-            'health': pd.DataFrame()
-        }
+        st.error(f"Error loading database: {e}")
+        return {'trades': pd.DataFrame(), 'equity': pd.DataFrame(), 'health': pd.DataFrame()}
+
+def generate_demo_data_automatically():
+    """Generate demo data automatically for dashboard demonstration"""
+    try:
+        from enhanced_state_manager import DashboardStateManager
+        import random
+        from datetime import datetime, timedelta
+        
+        dashboard = DashboardStateManager()
+        
+        # Generate demo trades over the last 7 days
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=7)
+        
+        # Create realistic trade scenarios
+        current_time = start_time
+        trade_id = 1
+        
+        strategies = ["IchimokuTrend", "RsiReversal"]
+        base_price = 95000.0
+        
+        while current_time < end_time and trade_id <= 15:  # Limit to 15 trades
+            # Generate 1-2 trades per day on average
+            if random.random() < 0.25:  # 25% chance of trade each 4-hour period
+                strategy = random.choice(strategies)
+                
+                # Generate entry trade
+                entry_price = base_price + random.uniform(-2000, 2000)
+                quantity = random.uniform(0.01, 0.05)  # 0.01 to 0.05 BTC
+                
+                entry_trade = {
+                    'symbol': 'BTC/USDT',
+                    'strategy': strategy,
+                    'side': 'buy',
+                    'quantity': quantity,
+                    'price': entry_price,
+                    'timestamp': current_time.isoformat(),
+                    'position_id': f'demo_pos_{trade_id}'
+                }
+                
+                # Log entry trade
+                dashboard.log_trade(entry_trade)
+                
+                # Generate exit trade 4-24 hours later
+                exit_time = current_time + timedelta(hours=random.uniform(4, 24))
+                if exit_time < end_time:
+                    # Generate realistic P&L
+                    price_change_pct = random.uniform(-0.05, 0.08)  # -5% to +8%
+                    exit_price = entry_price * (1 + price_change_pct)
+                    pnl = (exit_price - entry_price) * quantity
+                    
+                    exit_trade = {
+                        'symbol': 'BTC/USDT',
+                        'strategy': strategy,
+                        'side': 'sell',
+                        'quantity': quantity,
+                        'price': exit_price,
+                        'timestamp': exit_time.isoformat(),
+                        'position_id': f'demo_pos_{trade_id}',
+                        'pnl': pnl
+                    }
+                    
+                    # Log exit trade
+                    dashboard.log_trade(exit_trade)
+                    trade_id += 1
+            
+            current_time += timedelta(hours=4)
+        
+        # Generate equity snapshots
+        snapshot_time = start_time
+        current_equity = 4000.0
+        
+        while snapshot_time < end_time:
+            # Add some random equity fluctuation
+            daily_change = random.uniform(-0.02, 0.03)  # -2% to +3% daily
+            current_equity *= (1 + daily_change/6)  # 4-hour change
+            
+            # Create equity snapshot
+            equity_data = {
+                'timestamp': snapshot_time.isoformat(),
+                'total_equity': current_equity,
+                'ichimoku_equity': current_equity * 0.9,  # 90% allocation
+                'reversal_equity': current_equity * 0.1,  # 10% allocation
+                'open_positions': random.randint(0, 2),
+                'unrealized_pnl': random.uniform(-100, 200),
+                'daily_pnl': random.uniform(-50, 100)
+            }
+            
+            dashboard.log_equity_snapshot_direct(equity_data)
+            snapshot_time += timedelta(hours=4)
+        
+        st.success(f"✅ Generated demo trading data with {trade_id-1} completed trades")
+        
+    except Exception as e:
+        st.error(f"Failed to generate demo data: {e}")
+        st.info("Dashboard will show live data as it becomes available from the trading bot.")
 
 def calculate_metrics(data):
     """Calculate key performance metrics"""
@@ -250,7 +349,7 @@ def main():
     # Load data
     data = load_database_data()
     
-    # Check if data exists
+    # Check if data exists (after potential demo data generation)
     if data['trades'].empty and data['equity'].empty:
         st.warning("⚠️ No data available. Make sure your trading bot is running and logging data.")
         
