@@ -86,16 +86,16 @@ def load_database_data():
         
         conn.close()
         
-        # Auto-generate demo data if no trades exist (regardless of equity data)
-        if trades_df.empty:
-            st.info("🎯 No trading data found. Generating demo data for dashboard demonstration...")
-            generate_demo_data_automatically()
-            
-            # Reload data after generating demo data
-            conn = sqlite3.connect(DATABASE_PATH)
-            trades_df = pd.read_sql_query(trades_query, conn)
-            equity_df = pd.read_sql_query(equity_query, conn)
-            conn.close()
+        # Don't auto-generate demo data - show live data only
+        # if trades_df.empty:
+        #     st.info("🎯 No trading data found. Generating demo data for dashboard demonstration...")
+        #     generate_demo_data_automatically()
+        #     
+        #     # Reload data after generating demo data
+        #     conn = sqlite3.connect(DATABASE_PATH)
+        #     trades_df = pd.read_sql_query(trades_query, conn)
+        #     equity_df = pd.read_sql_query(equity_query, conn)
+        #     conn.close()
         
         return {
             'trades': trades_df,
