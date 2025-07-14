@@ -27,10 +27,19 @@ BYBIT_API_KEY = os.getenv('BYBIT_API_KEY')
 BYBIT_API_SECRET = os.getenv('BYBIT_API_SECRET')
 BYBIT_TESTNET = os.getenv('BYBIT_TESTNET', 'true').lower() == 'true'
 
+# Binance Configuration
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
+BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET')
+BINANCE_TESTNET = os.getenv('BINANCE_TESTNET', 'true').lower() == 'true'
+
 # Validate that required keys are loaded
 if not BYBIT_API_KEY or not BYBIT_API_SECRET:
     logger.warning("WARNING: BYBIT_API_KEY and BYBIT_API_SECRET not found in environment variables.")
-    logger.warning("Please create a .env file with your API keys or set them as environment variables.")
+    
+if not BINANCE_API_KEY or not BINANCE_API_SECRET:
+    logger.warning("WARNING: BINANCE_API_KEY and BINANCE_API_SECRET not found in environment variables.")
+    
+logger.info("Please create a .env file with your API keys or set them as environment variables.")
 
 class ExchangeError(Exception):
     """Custom exception for exchange-related errors"""
@@ -85,7 +94,7 @@ def initialize_exchange(exchange_name="bybit", api_key=None, secret_key=None, pa
     """
     try:
         # Validate exchange name
-        if exchange_name not in ['bybit', 'alpaca']:
+        if exchange_name not in ['bybit', 'alpaca', 'binance']:
             raise ExchangeError(f"Unsupported exchange: {exchange_name}")
         
         # Validate inputs
@@ -98,6 +107,8 @@ def initialize_exchange(exchange_name="bybit", api_key=None, secret_key=None, pa
             return _initialize_bybit(api_key, secret_key, paper_mode)
         elif exchange_name.lower() == "alpaca":
             return _initialize_alpaca(api_key, secret_key, paper_mode)
+        elif exchange_name.lower() == "binance":
+            return _initialize_binance(api_key, secret_key, paper_mode)
         else:
             raise ExchangeError(f"Exchange {exchange_name} not implemented")
             
@@ -190,6 +201,63 @@ def _initialize_alpaca(api_key=None, secret_key=None, paper_mode=True) -> Tuple[
     except Exception as e:
         logger.error(f"Alpaca initialization error: {e}")
         raise ExchangeError(f"Alpaca initialization failed: {e}")
+
+def _initialize_binance(api_key=None, secret_key=None, paper_mode=True) -> Tuple[Optional[Any], float]:
+    """Initialize Binance exchange connection"""
+    try:
+        # Use provided keys or fallback to environment variables
+        api_key = api_key or BINANCE_API_KEY
+        secret_key = secret_key or BINANCE_API_SECRET
+        
+        if not api_key or not secret_key:
+            raise ExchangeError("Binance API key and secret are required")
+        
+        logger.info("Using Binance Testnet" if BINANCE_TESTNET else "Using Binance Mainnet")
+        
+        # Initialize Binance exchange
+        exchange = ccxt.binance({
+            'apiKey': api_key,
+            'secret': secret_key,
+            'sandbox': BINANCE_TESTNET,  # Use testnet if enabled
+            'enableRateLimit': True,
+            'timeout': 30000,
+            'options': {
+                'defaultType': 'spot',  # Use spot trading
+            }
+        })
+        
+        # Load markets
+        exchange.load_markets()
+        
+        # Get account balance
+        balance_info = exchange.fetch_balance()
+        
+        # Calculate total balance (sum of all assets in USD equivalent)
+        total_balance = 0.0
+        if 'USDT' in balance_info['total']:
+            total_balance = balance_info['total']['USDT']
+        elif 'BUSD' in balance_info['total']:
+            total_balance = balance_info['total']['BUSD']
+        else:
+            # Fallback to first available balance
+            for asset, amount in balance_info['total'].items():
+                if amount > 0:
+                    total_balance = amount
+                    break
+        
+        logger.info(f"✅ Binance connection successful! Balance: ${total_balance:.2f}")
+        return exchange, total_balance
+        
+    except ccxt.NetworkError as e:
+        error_msg = str(e).lower()
+        if "403" in error_msg and ("forbidden" in error_msg or "cloudfront" in error_msg):
+            raise ExchangeError("Geographic blocking detected: Binance API is not accessible from this region. Using simulation mode.")
+        raise RetryableExchangeError(f"Network error connecting to Binance: {e}")
+    except ccxt.ExchangeError as e:
+        raise ExchangeError(f"Binance exchange error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error in Binance initialization: {e}")
+        raise RetryableExchangeError(f"Unexpected Binance error: {e}")
 
 @retry_on_failure(max_retries=2, delay=0.5)
 def execute_trade(symbol: str, side: str, amount_base_currency_to_trade: float, 

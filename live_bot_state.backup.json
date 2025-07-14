@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-07-14T02:18:35.211808",
+  "positions": {},
+  "strategy_states": {
+    "IchimokuTrend": {
+      "last_update": "2025-07-14T02:18:35.211805"
+    },
+    "RsiReversal": {
+      "last_update": "2025-07-14T02:18:35.211806"
+    }
+  },
+  "last_processed_timestamp": "2025-07-14T02:18:35.211807",
+  "equity_history": {},
+  "trade_history": [],
+  "metadata": {},
+  "version": "1.0",
+  "checksum": 50448012
+}

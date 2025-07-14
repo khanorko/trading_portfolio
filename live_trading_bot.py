@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class LiveTradingBot:
     def __init__(self):
         # Configuration
-        self.exchange_name = "bybit"
+        self.exchange_name = Config.EXCHANGE_NAME
         self.symbol = "BTC/USDT"
         self.timeframe = "4h"
         self.check_interval = 300  # Check every 5 minutes
